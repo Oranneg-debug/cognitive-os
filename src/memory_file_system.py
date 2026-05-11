@@ -82,6 +82,12 @@ class MemoryFileManager:
         if memory_data:
             return memory_data.get("models_participated", [])
         return []
+
+    def get_task_data(self, task_id: str) -> Dict:
+        """Retrieve the entire task JSON structure including opinions and oversight."""
+        file_path = os.path.join(self.active_path, f"{task_id}.json")
+        return self._read_json(file_path) or {}
+        
         
     def complete_task(self, task_id: str, output_path: str = None):
         """Mark the entire task as completed and archive it"""

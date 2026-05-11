@@ -34,7 +34,7 @@ def process_prompt(request: PromptRequest):
     # 1. Run Council
     result = orchestrator.process_request(request.prompt)
     
-    # 2. Save to Obsidian
+    # 2. Save to mock Obsidian vault (for backup/logging)
     pattern = orchestrator.sentry.classify_request(request.prompt)["pattern"]
     task_id = orchestrator.memory.generate_task_id(request.prompt)
     
@@ -44,13 +44,18 @@ def process_prompt(request: PromptRequest):
         pattern_used=pattern,
         task_id=task_id
     )
+
+    # 3. Retrieve full memory task data to return to the frontend
+    task_data = orchestrator.memory.get_task_data(task_id)
     
     return {
         "status": "success",
         "pattern": pattern,
         "task_id": task_id,
         "saved_path": file_path,
-        "response": result
+        "response": result,
+        "opinions": task_data.get("models_participated", []),
+        "oversight": task_data.get("oversight_analysis", {}).get("raw_analysis", "")
     }
 
 def main():
