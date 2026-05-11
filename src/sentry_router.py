@@ -6,52 +6,84 @@ from typing import Dict
 class SentryRouter:
     """
     Pattern Selector for Cognitive OS Orchestrator.
-    Routes requests to one of five orchestration patterns.
+    Routes requests to one of six orchestration patterns.
     """
     
     def __init__(self):
         self.patterns = {
             "SIMPLE": "Single model pass, Reflex Layer",
             "STANDARD": "Single model + preset, Operational Brain",
-            "SMALL_COUNCIL": "Draft → Refine → Synthesize pipeline",
+            "SMALL_COUNCIL": "Draft (Specialist) → Refine (Critic) → Synthesize pipeline",
+            "DESIGN_COUNCIL": "Draft (Creative) → Refine (Critic) → Synthesize + Image Prompts",
             "SEQUENTIAL_BOARDROOM": "Local: Independent opinions + memory file",
             "ONLINE_BOARDROOM": "Frontier models via API (Parallel)"
         }
         
     def classify_request(self, user_input: str) -> Dict[str, any]:
         """Main classification function"""
-        complexity = self._assess_complexity(user_input)
+        complexity, domain = self._assess_complexity(user_input)
         is_online = self._check_connectivity()
         available_vram_gb = self._get_available_vram()
         
-        pattern = self._select_pattern(complexity, is_online, available_vram_gb)
+        pattern = self._select_pattern(complexity, domain, is_online)
         
         return {
             "pattern": pattern,
             "complexity": complexity,
+            "domain": domain,
             "is_online": is_online,
             "available_vram_gb": available_vram_gb,
             "timestamp": datetime.now().isoformat()
         }
         
-    def _assess_complexity(self, text: str) -> str:
+    def _assess_complexity(self, text: str) -> tuple[str, str]:
         low_keywords = ["tag", "summary", "extract", "convert", "format", "clean", "organize", "list", "count"]
-        medium_keywords = ["write", "concept", "design", "idea", "draft", "journal", "story", "poem", "creative", "tattoo"]
-        high_keywords = ["strategy", "plan", "system", "analysis", "decision", "architecture", "design", "framework", "roadmap", "business", "life systems", "future"]
+        
+        # Domains
+        creative_keywords = ["design", "idea", "creative", "tattoo", "brainstorm", "concept", "story", "poem", "art", "visualize"]
+        technical_keywords = ["code", "script", "refactor", "bug", "technical", "implement", "function", "optimize", "system", "architecture"]
+        strategic_keywords = ["strategy", "plan", "analysis", "decision", "framework", "roadmap", "business", "life systems", "future", "boardroom", "comprehensive"]
         
         text_lower = text.lower()
-        low_count = sum(1 for kw in low_keywords if kw in text_lower)
-        medium_count = sum(1 for kw in medium_keywords if kw in text_lower)
-        high_count = sum(1 for kw in high_keywords if kw in text_lower)
         
+        low_count = sum(1 for kw in low_keywords if kw in text_lower)
+        creative_count = sum(1 for kw in creative_keywords if kw in text_lower)
+        technical_count = sum(1 for kw in technical_keywords if kw in text_lower)
+        strategic_count = sum(1 for kw in strategic_keywords if kw in text_lower)
+        
+        domain_counts = {"creative": creative_count, "technical": technical_count, "strategic": strategic_count}
+        domain = max(domain_counts, key=domain_counts.get)
+        if domain_counts[domain] == 0:
+            domain = "technical" # default
+            
+        total_high_med = creative_count + technical_count + strategic_count
         length_score = len(text.split()) / 50
         
-        if high_count >= 2 or (high_count >= 1 and length_score > 3):
-            return "high"
-        elif medium_count >= 2 or (medium_count >= 1 and low_count == 0):
-            return "medium"
+        if strategic_count >= 2 or total_high_med >= 3 or (total_high_med >= 1 and length_score > 3):
+            complexity = "high"
+        elif total_high_med >= 1 or length_score > 1:
+            complexity = "medium"
         else:
-            return "low"
+            complexity = "low"
+            
+        # Overrides based on explicit user requests (Slash commands for Obsidian)
+        if "/design" in text_lower or "/creative" in text_lower or "design council" in text_lower or "creative council" in text_lower:
+            complexity = "high"
+            domain = "creative"
+        elif "/technical" in text_lower or "/small" in text_lower or "small council" in text_lower or "technical council" in text_lower:
+            complexity = "high"
+            domain = "technical"
+        elif "/boardroom" in text_lower or "/strategic" in text_lower or "boardroom" in text_lower:
+            complexity = "high"
+            domain = "strategic"
+        elif "/simple" in text_lower:
+            complexity = "low"
+            domain = "technical"
+        elif "/standard" in text_lower:
+            complexity = "medium"
+            domain = "technical"
+            
+        return complexity, domain
             
     def _check_connectivity(self) -> bool:
         try:
@@ -79,16 +111,18 @@ class SentryRouter:
         except Exception:
             return 48.0 # Fallback
             
-    def _select_pattern(self, complexity: str, is_online: bool, vram_gb: float) -> str:
+    def _select_pattern(self, complexity: str, domain: str, is_online: bool) -> str:
         if complexity == "low":
             return "SIMPLE"
         elif complexity == "medium":
             return "STANDARD"
         else:
-            if is_online:
+            if is_online and domain == "strategic":
                 return "ONLINE_BOARDROOM"
             else:
-                if vram_gb >= 42:
+                if domain == "strategic":
                     return "SEQUENTIAL_BOARDROOM"
+                elif domain == "creative":
+                    return "DESIGN_COUNCIL"
                 else:
                     return "SMALL_COUNCIL"

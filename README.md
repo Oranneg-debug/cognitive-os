@@ -80,7 +80,13 @@ python -m src.telegram_bot
 4. The final markdown is sent back to the chat and saved to Obsidian.
 
 ### Using from Obsidian
-1. Install the `obsidian-lmstudio-agent` plugin.
-2. Highlight text in any note.
-3. Open the Command Palette (`Ctrl+P`) -> **"Consult Cognitive OS Council"**.
-4. A background POST request is sent to `localhost:5000`. Minutes later, the master document appears in your vault.
+1. **Ensure the API is Running**: You must have the FastAPI server running (`python src/api.py` or by double-clicking `start_services.bat`). By default, it runs on port 5000.
+2. **Install the Plugin**: Build and install the local `obsidian-lmstudio-agent` plugin into your Obsidian vault.
+3. **Configure the Plugin**: Open Obsidian Settings -> **LM Studio Agent** -> Expand the **🧠 Cognitive OS** section. Ensure the API endpoint matches your FastAPI server (default: `http://127.0.0.1:5000/process`).
+4. **Select Text**: Highlight text in any note.
+5. **Route to Council**: Open the Command Palette (`Ctrl+P`) and search for `Cognitive OS`. You will see 4 options:
+   - `Cognitive OS: Auto-Route Council` (Relies on the Python heuristic router)
+   - `Cognitive OS: Design Council` (Forces the Creative Council via `/design`)
+   - `Cognitive OS: Technical Council` (Forces the Technical Council via `/technical`)
+   - `Cognitive OS: Boardroom` (Forces the full Sequential Boardroom via `/boardroom`)
+6. A background POST request is sent to your FastAPI server. Minutes later, the synthesized master document appears in your vault's memory folder.

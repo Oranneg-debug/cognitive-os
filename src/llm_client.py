@@ -21,7 +21,10 @@ class LLMClient:
         temperature: float = 0.7,
         top_p: float = 0.9,
         top_k: int = 40,
-        max_tokens: int = 2048
+        repeat_penalty: float = 1.1,
+        max_tokens: int = 2048,
+        context_window: int = 8192,
+        gpu_layers: int = -1
     ) -> str:
         """
         Generate a response using the local LLM.
@@ -40,7 +43,12 @@ class LLMClient:
                 temperature=temperature,
                 top_p=top_p,
                 max_tokens=max_tokens,
-                extra_body={"top_k": top_k} # Passes top_k directly to LM Studio
+                extra_body={
+                    "top_k": top_k,
+                    "repeat_penalty": repeat_penalty,
+                    "n_ctx": context_window,
+                    "n_gpu_layers": gpu_layers
+                }
             )
             return response.choices[0].message.content
         except Exception as e:
