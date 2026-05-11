@@ -71,6 +71,12 @@ class LLMClient:
             
             for model in loaded_models.data:
                 model_id = model.id
+                
+                # Protect embedding models from being unloaded so RAG stays functional
+                if "embed" in model_id.lower():
+                    print(f"🛡️ Skipping unload of embedder model: {model_id}")
+                    continue
+                    
                 requests.post(unload_url, json={"instance_id": model_id}, timeout=5)
                 print(f"🧹 Unloaded model: {model_id}")
                 
