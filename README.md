@@ -55,14 +55,18 @@ Open `src/obsidian_writer.py` and update the `self.vault_path` to point to your 
 
 ### 4. Running the OS
 
-**Method 1: Windows Startup (Recommended)**
-Double-click `start_services.bat` to launch both the API and Telegram listener simultaneously. 
-*(To make this run invisibly on boot, place `StartCognitiveOS.vbs` in your Windows `shell:startup` folder).*
+**Method 1: Windows Terminal & Auto-Start (Recommended)**
+Double-click `start_services.bat`. This utilizes **Windows Terminal** to cleanly launch the entire stack in a single window with 3 separate tabs:
+1. LM Studio Local Server
+2. Cognitive OS FastAPI Server
+3. Telegram Bot Listener
+
+*(To make the stack run automatically every time you boot your PC, simply create a shortcut to `start_services.bat` and place it in your Windows Startup folder: `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup`).*
 
 **Method 2: Manual Terminal**
 Terminal 1 (Obsidian API):
 ```bash
-python src/api.py
+python -m src.api
 ```
 Terminal 2 (Telegram Bot):
 ```bash
@@ -80,7 +84,7 @@ python -m src.telegram_bot
 4. The final markdown is sent back to the chat and saved to Obsidian.
 
 ### Using from Obsidian
-1. **Ensure the API is Running**: You must have the FastAPI server running (`python src/api.py` or by double-clicking `start_services.bat`). By default, it runs on port 5000.
+1. **Ensure the API is Running**: You must have the FastAPI server running (`python -m src.api` or by double-clicking `start_services.bat`). By default, it runs on port 5000.
 2. **Install the Plugin**: Build and install the local `obsidian-lmstudio-agent` plugin into your Obsidian vault.
 3. **Configure the Plugin**: Open Obsidian Settings -> **LM Studio Agent** -> Expand the **🧠 Cognitive OS** section. Ensure the API endpoint matches your FastAPI server (default: `http://127.0.0.1:5000/process`).
 4. **Select Text**: Highlight text in any note.
