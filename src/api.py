@@ -4,7 +4,17 @@ from pydantic import BaseModel
 from src.orchestrator import Orchestrator
 from src.obsidian_writer import ObsidianWriter
 
+from fastapi.middleware.cors import CORSMiddleware
+
 app = FastAPI(title="Cognitive OS API")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 orchestrator = Orchestrator()
 obsidian = ObsidianWriter()
 
@@ -45,7 +55,7 @@ def process_prompt(request: PromptRequest):
 
 def main():
     print("🌐 Starting FastAPI Server on port 5000...")
-    uvicorn.run("src.api:app", host="1234", port=5000, reload=True) # host="0.0.0.0" to allow network access
+    uvicorn.run("src.api:app", host="0.0.0.0", port=5000, reload=True)
 
 if __name__ == "__main__":
     uvicorn.run("src.api:app", host="0.0.0.0", port=5000)
