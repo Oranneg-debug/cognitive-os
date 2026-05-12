@@ -56,10 +56,10 @@ Open `src/obsidian_writer.py` and update the `self.vault_path` to point to your 
 ### 4. Running the OS
 
 **Method 1: Headless Background Mode (Recommended)**
-Double-click `start_services.bat` to silently launch the FastAPI server and Telegram bot in the background. Because they run headlessly to prevent taskbar clutter, no terminal windows will appear.
+Double-click `start_services.bat` to silently launch the FastAPI server, Telegram bot, and LM Studio local server in the background. Because they run headlessly to prevent taskbar clutter, no terminal windows will appear.
 
-- **Viewing the Logs**: All console output is automatically routed to log files in the root directory. To monitor the system or debug issues, open `api.log` and `telegram.log`.
-  *(Tip: To watch the logs live like a terminal, open PowerShell and run `Get-Content api.log -Wait`)*
+- **Viewing the Logs**: All console output is automatically routed to log files in the root directory. To monitor the system or debug issues, open `api.log`, `telegram.log`, or `lms.log`.
+  *(Tip: To watch the logs live like a terminal, open PowerShell and run `Get-Content api.log -Wait` or use the LM Studio CLI command: `lms log stream`)*
 
 *(To make the stack run automatically every time you boot your PC, we use a hidden VBS wrapper. Place `StartCognitiveOS.vbs` in your Windows Startup folder: `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup`).*
 
