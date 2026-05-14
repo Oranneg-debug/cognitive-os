@@ -2,7 +2,7 @@ import os
 from datetime import datetime
 
 class ObsidianWriter:
-    def __init__(self, vault_path: str = "E:/Antigravity/mock_vault"):
+    def __init__(self, vault_path: str = "E:/Oranneg/CloudStation/Documents/Obsidian/Grand Nexus/AI-Help/cognitive-os"):
         self.vault_path = vault_path
         os.makedirs(self.vault_path, exist_ok=True)
         
@@ -18,11 +18,22 @@ class ObsidianWriter:
             
         file_path = os.path.join(self.vault_path, filename)
         
+        import re
+        # Find all hashtags in the content (e.g. #DarkMaestro) and strip the '#'
+        found_tags = set(re.findall(r'(?<![\w])#([a-zA-Z_][a-zA-Z0-9_\-]+)', content))
+        
+        # Combine default tags with found tags
+        base_tags = ["ai-council", pattern_used.lower().replace('_', '-')]
+        all_tags = base_tags + list(found_tags)
+        
+        # Format tags for YAML (comma-separated, no brackets here as we will wrap them)
+        tags_str = ", ".join(all_tags)
+
         # Add YAML Frontmatter
         frontmatter = f"""---
 title: "{title}"
 created: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-tags: [ai-council, {pattern_used.lower().replace('_', '-')}]
+tags: [{tags_str}]
 pattern_used: {pattern_used}
 task_id: {task_id}
 ---

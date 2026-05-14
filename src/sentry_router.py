@@ -13,8 +13,8 @@ class SentryRouter:
         self.patterns = {
             "SIMPLE": "Single model pass, Reflex Layer",
             "STANDARD": "Single model + preset, Operational Brain",
-            "SMALL_COUNCIL": "Draft (Specialist) → Refine (Critic) → Synthesize pipeline",
-            "DESIGN_COUNCIL": "Draft (Creative) → Refine (Critic) → Synthesize + Image Prompts",
+            "TECHNICAL_MEETING": "Draft (Specialist) → Expand (Creative) → Refine (Critic) → Synthesize pipeline",
+            "DESIGN_MEETING": "Draft (junior_designer) → Expand (creative_expansionist) → Refine (Critic) → Synthesize + Image Prompts (senior_designer)",
             "SEQUENTIAL_BOARDROOM": "Local: Independent opinions + memory file",
             "ONLINE_BOARDROOM": "Frontier models via API (Parallel)"
         }
@@ -66,20 +66,20 @@ class SentryRouter:
         else:
             complexity = "low"
             
-        # Overrides based on explicit user requests (Slash commands for Obsidian)
-        if "/design" in text_lower or "/creative" in text_lower or "design council" in text_lower or "creative council" in text_lower:
+        # Overrides based on explicit user requests (Slash/Hash commands for Obsidian)
+        if "/design" in text_lower or "#design" in text_lower or "/creative" in text_lower or "design meeting" in text_lower or "design council" in text_lower or "creative council" in text_lower:
             complexity = "high"
             domain = "creative"
-        elif "/technical" in text_lower or "/small" in text_lower or "small council" in text_lower or "technical council" in text_lower:
+        elif "/technical" in text_lower or "#technical" in text_lower or "/small" in text_lower or "technical meeting" in text_lower or "small council" in text_lower or "technical council" in text_lower:
             complexity = "high"
             domain = "technical"
-        elif "/boardroom" in text_lower or "/strategic" in text_lower or "boardroom" in text_lower:
+        elif "/boardroom" in text_lower or "#boardroom" in text_lower or "/strategic" in text_lower or "boardroom" in text_lower:
             complexity = "high"
             domain = "strategic"
-        elif "/simple" in text_lower:
+        elif "/simple" in text_lower or "#simple" in text_lower or "/vision" in text_lower or "#vision" in text_lower:
             complexity = "low"
             domain = "technical"
-        elif "/standard" in text_lower:
+        elif "/standard" in text_lower or "#standard" in text_lower:
             complexity = "medium"
             domain = "technical"
             
@@ -123,6 +123,6 @@ class SentryRouter:
                 if domain == "strategic":
                     return "SEQUENTIAL_BOARDROOM"
                 elif domain == "creative":
-                    return "DESIGN_COUNCIL"
+                    return "DESIGN_MEETING"
                 else:
-                    return "SMALL_COUNCIL"
+                    return "TECHNICAL_MEETING"

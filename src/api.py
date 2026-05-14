@@ -18,8 +18,11 @@ app.add_middleware(
 orchestrator = Orchestrator()
 obsidian = ObsidianWriter()
 
+from typing import Optional
+
 class PromptRequest(BaseModel):
     prompt: str
+    image_base64: Optional[str] = None
 
 @app.post("/process")
 def process_prompt(request: PromptRequest):
@@ -32,7 +35,7 @@ def process_prompt(request: PromptRequest):
     print(f"\n🌐 API Request Received: {request.prompt[:50]}...")
     
     # 1. Run Council
-    result = orchestrator.process_request(request.prompt)
+    result = orchestrator.process_request(request.prompt, image_base64=request.image_base64)
     
     # 2. Save to mock Obsidian vault (for backup/logging)
     pattern = orchestrator.sentry.classify_request(request.prompt)["pattern"]
@@ -47,12 +50,15 @@ def process_prompt(request: PromptRequest):
 
     # 3. Retrieve full memory task data to return to the frontend
     task_data = orchestrator.memory.get_task_data(task_id)
-    
+    # Determine relative path by slicing off the vault root
+    relative_path = file_path.split("Grand Nexus/")[-1].replace("\\", "/") if "Grand Nexus" in file_path else file_path
+
     return {
         "status": "success",
         "pattern": pattern,
         "task_id": task_id,
         "saved_path": file_path,
+        "relative_path": relative_path,
         "response": result,
         "opinions": task_data.get("models_participated", []),
         "oversight": task_data.get("oversight_analysis", {}).get("raw_analysis", "")

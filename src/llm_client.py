@@ -9,7 +9,7 @@ class LLMClient:
     Connects to the local server, typically at http://localhost:1234/v1
     """
     
-    def __init__(self, base_url: str = "http://192.168.1.223:1234/v1", api_key: str = "lm-studio"):
+    def __init__(self, base_url: str = "http://127.0.0.1:1234/v1", api_key: str = "lm-studio"):
         # LM Studio acts as a drop-in replacement for OpenAI
         self.client = OpenAI(base_url=base_url, api_key=api_key)
         
@@ -24,7 +24,8 @@ class LLMClient:
         repeat_penalty: float = 1.1,
         max_tokens: int = 2048,
         context_window: int = 8192,
-        gpu_layers: int = -1
+        gpu_layers: int = -1,
+        image_base64: Optional[str] = None
     ) -> str:
         """
         Generate a response using the local LLM.
@@ -34,8 +35,39 @@ class LLMClient:
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
             
-        messages.append({"role": "user", "content": prompt})
+        if image_base64:
+            messages.append({
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {"url": image_base64}}
+                ]
+            })
+        else:
+            messages.append({"role": "user", "content": prompt})
         
+        # 1. Explicitly load the model with load-time parameters (structural configuration)
+        try:
+            host_url = f"{self.client.base_url.scheme}://{self.client.base_url.host}:{self.client.base_url.port}"
+            load_url = f"{host_url}/api/v1/models/load"
+            
+            # Map -1 to 'max' for LM Studio's preferred offload ratio, but also provide gpu_layers
+            gpu_ratio = "max" if gpu_layers == -1 else None
+            
+            load_payload = {
+                "model": model,
+                "config": {
+                    "contextLength": context_window,
+                    "context_window": context_window,  # Provided as fallback
+                    "gpuOffloadRatio": gpu_ratio,
+                    "gpu_layers": gpu_layers           # Provided as fallback
+                }
+            }
+            requests.post(load_url, json=load_payload, timeout=600)
+        except Exception as e:
+            print(f"⚠️ Could not explicitly load model parameters: {e}")
+
+        # 2. Execute the inference request (execution metrics only)
         try:
             response = self.client.chat.completions.create(
                 model=model,
@@ -45,9 +77,7 @@ class LLMClient:
                 max_tokens=max_tokens,
                 extra_body={
                     "top_k": top_k,
-                    "repeat_penalty": repeat_penalty,
-                    "n_ctx": context_window,
-                    "n_gpu_layers": gpu_layers
+                    "repeat_penalty": repeat_penalty
                 }
             )
             return response.choices[0].message.content
