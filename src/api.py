@@ -23,6 +23,7 @@ from typing import Optional
 class PromptRequest(BaseModel):
     prompt: str
     image_base64: Optional[str] = None
+    compass_weight: Optional[str] = None
 
 @app.post("/process")
 def process_prompt(request: PromptRequest):
@@ -35,7 +36,11 @@ def process_prompt(request: PromptRequest):
     print(f"\n🌐 API Request Received: {request.prompt[:50]}...")
     
     # 1. Run Council
-    result = orchestrator.process_request(request.prompt, image_base64=request.image_base64)
+    result = orchestrator.process_request(
+        request.prompt, 
+        image_base64=request.image_base64,
+        compass_weight=request.compass_weight
+    )
     
     # 2. Save to mock Obsidian vault (for backup/logging)
     pattern = orchestrator.sentry.classify_request(request.prompt)["pattern"]
@@ -48,8 +53,10 @@ def process_prompt(request: PromptRequest):
         task_id=task_id
     )
 
-    # 3. Retrieve full memory task data to return to the frontend
+    # 3. Retrieve full memory task data and archive to vault
     task_data = orchestrator.memory.get_task_data(task_id)
+    obsidian.save_memory_log(task_id, task_data)
+    
     # Determine relative path by slicing off the vault root
     relative_path = file_path.split("Grand Nexus/")[-1].replace("\\", "/") if "Grand Nexus" in file_path else file_path
 

@@ -85,8 +85,18 @@ class MemoryFileManager:
 
     def get_task_data(self, task_id: str) -> Dict:
         """Retrieve the entire task JSON structure including opinions and oversight."""
-        file_path = os.path.join(self.active_path, f"{task_id}.json")
-        return self._read_json(file_path) or {}
+        # Try active first
+        active_file = os.path.join(self.active_path, f"{task_id}.json")
+        data = self._read_json(active_file)
+        if data:
+            return data
+            
+        # Try archived (search subfolders)
+        for root, dirs, files in os.walk(self.archived_path):
+            if f"{task_id}.json" in files:
+                return self._read_json(os.path.join(root, f"{task_id}.json")) or {}
+                
+        return {}
         
         
     def complete_task(self, task_id: str, output_path: str = None):

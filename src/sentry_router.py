@@ -16,7 +16,8 @@ class SentryRouter:
             "TECHNICAL_MEETING": "Draft (Specialist) → Expand (Creative) → Refine (Critic) → Synthesize pipeline",
             "DESIGN_MEETING": "Draft (junior_designer) → Expand (creative_expansionist) → Refine (Critic) → Synthesize + Image Prompts (senior_designer)",
             "SEQUENTIAL_BOARDROOM": "Local: Independent opinions + memory file",
-            "ONLINE_BOARDROOM": "Frontier models via API (Parallel)"
+            "ONLINE_BOARDROOM": "Frontier models via API (Parallel)",
+            "NFT_CREATION": "NFT Metadata generation + Minting simulation"
         }
         
     def classify_request(self, user_input: str) -> Dict[str, any]:
@@ -25,7 +26,7 @@ class SentryRouter:
         is_online = self._check_connectivity()
         available_vram_gb = self._get_available_vram()
         
-        pattern = self._select_pattern(complexity, domain, is_online)
+        pattern = self._select_pattern(complexity, domain, is_online, user_input)
         
         return {
             "pattern": pattern,
@@ -40,7 +41,7 @@ class SentryRouter:
         low_keywords = ["tag", "summary", "extract", "convert", "format", "clean", "organize", "list", "count"]
         
         # Domains
-        creative_keywords = ["design", "idea", "creative", "tattoo", "brainstorm", "concept", "story", "poem", "art", "visualize"]
+        creative_keywords = ["design", "idea", "creative", "tattoo", "brainstorm", "concept", "story", "poem", "art", "visualize", "nft", "mint", "crypto"]
         technical_keywords = ["code", "script", "refactor", "bug", "technical", "implement", "function", "optimize", "system", "architecture"]
         strategic_keywords = ["strategy", "plan", "analysis", "decision", "framework", "roadmap", "business", "life systems", "future", "boardroom", "comprehensive"]
         
@@ -82,6 +83,9 @@ class SentryRouter:
         elif "/standard" in text_lower or "#standard" in text_lower:
             complexity = "medium"
             domain = "technical"
+        elif "/nft" in text_lower or "#nft" in text_lower or "nft creation" in text_lower:
+            complexity = "high"
+            domain = "creative"
             
         return complexity, domain
             
@@ -110,8 +114,12 @@ class SentryRouter:
             return 48.0
         except Exception:
             return 48.0 # Fallback
+        
+    def _select_pattern(self, complexity: str, domain: str, is_online: bool, user_input: str = "") -> str:
+        text_lower = user_input.lower()
+        if "/nft" in text_lower or "#nft" in text_lower or "nft creation" in text_lower:
+            return "NFT_CREATION"
             
-    def _select_pattern(self, complexity: str, domain: str, is_online: bool) -> str:
         if complexity == "low":
             return "SIMPLE"
         elif complexity == "medium":

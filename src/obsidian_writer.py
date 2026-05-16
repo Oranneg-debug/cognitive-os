@@ -4,7 +4,9 @@ from datetime import datetime
 class ObsidianWriter:
     def __init__(self, vault_path: str = "E:/Oranneg/CloudStation/Documents/Obsidian/Grand Nexus/AI-Help/cognitive-os"):
         self.vault_path = vault_path
+        self.memory_path = os.path.join(vault_path, "memory_logs")
         os.makedirs(self.vault_path, exist_ok=True)
+        os.makedirs(self.memory_path, exist_ok=True)
         
     def write_note(self, title: str, content: str, pattern_used: str, task_id: str) -> str:
         """
@@ -39,7 +41,8 @@ task_id: {task_id}
 ---
 
 """
-        full_content = frontmatter + content
+        memory_footer = f"\n\n---\n### 🧠 Deliberation Memory\n[Open Full Memory Log](file:///./memory_logs/{task_id}.json)"
+        full_content = frontmatter + content + memory_footer
         
         try:
             with open(file_path, 'w', encoding='utf-8') as f:
@@ -49,3 +52,45 @@ task_id: {task_id}
         except Exception as e:
             print(f"❌ Failed to write to Obsidian: {e}")
             return ""
+
+    def save_memory_log(self, task_id: str, memory_data: dict):
+        """Saves a copy of the boardroom memory JSON into the Obsidian vault for backlinking."""
+        import json
+        memory_file = os.path.join(self.memory_path, f"{task_id}.json")
+        try:
+            with open(memory_file, 'w', encoding='utf-8') as f:
+                json.dump(memory_data, f, indent=2, ensure_ascii=False)
+            print(f"🧠 Memory log archived to vault: {memory_file}")
+        except Exception as e:
+            print(f"⚠️ Failed to archive memory log: {e}")
+
+    def search_vault(self, query: str, limit: int = 5) -> list:
+        """
+        Performs a basic keyword search over the vault.
+        """
+        results = []
+        query = query.lower()
+        
+        # Traverse the vault
+        for root, _, files in os.walk(self.vault_path):
+            for file in files:
+                if file.endswith(".md"):
+                    path = os.path.join(root, file)
+                    try:
+                        with open(path, 'r', encoding='utf-8') as f:
+                            content = f.read()
+                            if query in content.lower() or query in file.lower():
+                                # Simple scoring: title match is better
+                                score = 2 if query in file.lower() else 1
+                                results.append({
+                                    "title": file.replace(".md", ""),
+                                    "path": path,
+                                    "snippet": content[:200] + "...",
+                                    "score": score
+                                })
+                    except:
+                        continue
+        
+        # Sort by score and return top results
+        results.sort(key=lambda x: x["score"], reverse=True)
+        return results[:limit]
