@@ -50,26 +50,20 @@ pip install -r requirements.txt
 
 #### A. Models & Roles — Centralized Config
 
-All model settings are defined in **one source of truth**: `cognitive-os/config/models_config.json`
+All model settings are defined in **one source of truth**: `cognitive-os/dev/master_config.md` (YAML inside a markdown file).
 
-```json
-{
-  "models": {
-    "ministral-3-3b-instruct-2512": {
-      "temperature": 0.4,
-      "top_p": 0.9,
-      "context_window": 131072,
-      "gpu_layers": -1
-    }
-  },
-  "roles": {
-    "simple": {
-      "model": "ministral-3-3b-instruct-2512",
-      "temperature": 0.4,
-      "system_prompt": "You are..."
-    }
-  }
-}
+```yaml
+models:
+  ministral-3-3b-instruct-2512:
+    temperature: 0.4
+    top_p: 0.9
+    context_window: 131072
+    gpu_layers: -1
+roles:
+  simple:
+    model: ministral-3-3b-instruct-2512
+    temperature: 0.4
+    system_prompt: "You are..."
 ```
 
 **To change a model setting — 3 options:**
@@ -80,10 +74,10 @@ All model settings are defined in **one source of truth**: `cognitive-os/config/
 3. Select any role from the sidebar → adjust sliders/inputs → click **Save Configuration**
 4. Changes apply instantly — **no restart required**
 
-**Option 2: Edit JSON directly**
-1. Open `cognitive-os/config/models_config.json`
-2. Modify the desired field
-3. Restart the FastAPI server
+**Option 2: Edit YAML directly**
+1. Open `cognitive-os/dev/master_config.md`
+2. Modify the desired field inside the ```yaml ... ``` block
+3. Save — the orchestrator reloads automatically on mtime change (no restart needed)
 
 **Option 3: Python API**
 ```python
