@@ -516,7 +516,13 @@ header {
     font-family: "Iosevka", "Iosevka Mono", "Fira Code", "JetBrains Mono",
                  "Consolas", "Menlo", monospace;
     color: var(--lms-ink);
+    /* Adaptive padding: tight on phones, generous on widescreen, capped so the
+       content doesn't drift to the far edges of an ultrawide. */
     padding: clamp(1rem, 3vw, 4rem);
+    /* Centre the working area on ultrawide monitors so cards don't stretch
+       to absurd widths. 1800px keeps two 70B model_keys side-by-side comfortably. */
+    max-width: 1800px;
+    margin-inline: auto;
     background:
         repeating-linear-gradient(
             0deg,
@@ -590,10 +596,39 @@ header {
     display: block;
 }
 
+/* ------------------------------------------------------------
+ * Console layout — adaptive across phone -> 4K widescreen.
+ *
+ * Phone / narrow (≤900px):  single column, each card full width.
+ * Laptop (900-1400px):      loaded full-width on top, load-form +
+ *                           result panel side-by-side.
+ * Widescreen (≥1400px):     three columns — loaded list (5), load form
+ *                           (4), result panel (3) — so all three live on
+ *                           the same row and you can see input, output,
+ *                           and current state at a glance.
+ * ------------------------------------------------------------ */
 .lms-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    grid-template-columns: 1fr;
     gap: 1rem;
+}
+
+@media (min-width: 900px) {
+    .lms-grid {
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    }
+    .lms-loaded   { grid-column: 1 / -1; }
+    .lms-loadform { grid-column: 1; min-width: 0; }
+    .lms-result   { grid-column: 2; min-width: 0; }
+}
+
+@media (min-width: 1400px) {
+    .lms-grid {
+        grid-template-columns: minmax(0, 5fr) minmax(0, 4fr) minmax(0, 3fr);
+    }
+    .lms-loaded   { grid-column: 1; }
+    .lms-loadform { grid-column: 2; min-width: 0; }
+    .lms-result   { grid-column: 3; min-width: 0; }
 }
 
 .lms-bench-grid {
@@ -602,12 +637,12 @@ header {
     gap: 1rem;
 }
 
-.lms-loaded { grid-column: 1 / -1; }
-.lms-loadform { grid-column: span 2; min-width: 0; }
-.lms-result { grid-column: 1 / -1; }
-
-@media (max-width: 700px) {
-    .lms-loadform { grid-column: 1 / -1; }
+/* Widescreen: history table + detail panel side-by-side */
+@media (min-width: 1400px) {
+    .lms-bench-grid {
+        grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+        align-items: start;
+    }
 }
 
 .lms-card {
@@ -717,9 +752,19 @@ header {
 
 .lms-form {
     display: grid;
+    /* Form fields adapt: 1 col on narrow, up to 3 on wide enough cards.
+       Capped so labels stay readable rather than spreading thin. */
     grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
     gap: 0.75rem;
     padding: 1rem;
+}
+
+/* When the form card itself is narrow (widescreen 3-column mode places it in
+   the middle slot at ~500px), force single column for legibility. */
+@media (min-width: 1400px) {
+    .lms-loadform .lms-form {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
 }
 
 .lms-field {
