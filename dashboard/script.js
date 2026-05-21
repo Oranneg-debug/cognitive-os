@@ -298,6 +298,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Orchestrations tab: render cards (no diagram fetch)
         if (tabName === 'orchestrations') {
+            lmstudio.deactivate();
             renderOrchestrationCards();
             return;
         }
@@ -307,6 +308,9 @@ document.addEventListener('DOMContentLoaded', () => {
             lmstudio.activate();
             return;
         }
+
+        // Any other tab: stop the LM Studio log poller
+        lmstudio.deactivate();
 
         // Load content for diagram tabs if they haven't been loaded yet
         if (tabName !== 'config' && !document.getElementById(tabName).hasAttribute('data-loaded')) {
@@ -759,6 +763,82 @@ document.addEventListener('DOMContentLoaded', () => {
             if (name === 'benchmarks') refreshBenchmarks();
         }
 
+        // ---------------------------------------------------------------
+        // LM Studio runtime log tail (right side of Console).
+        // ---------------------------------------------------------------
+        let logPollHandle = null;
+
+        // Patterns the bench-runner SOP watches for. Coloured for at-a-glance
+        // confirmation that a load did what we asked.
+        const LOG_PATTERNS = [
+            { re: /pipeline parallelism enabled/i, cls: 'lms-log-hit' },
+            { re: /flash_attn\s*=\s*enabled/i,     cls: 'lms-log-hit' },
+            { re: /LlamaV4::load (called|config)/i, cls: 'lms-log-hit' },
+            { re: /llama_kv_cache:\s*size/i,        cls: 'lms-log-hit' },
+            { re: /n_seq_max\s*=/i,                 cls: 'lms-log-hit' },
+            { re: /retrying without pipeline parallelism/i, cls: 'lms-log-warn' },
+            { re: /cudaMalloc failed/i,             cls: 'lms-log-err' },
+            { re: /out of memory|OOM/i,             cls: 'lms-log-err' },
+            { re: /\[ERROR\]|ERROR:/,               cls: 'lms-log-err' },
+            { re: /\[WARN(?:ING)?\]|WARN:/,         cls: 'lms-log-warn' },
+        ];
+
+        function escapeHtml(s) {
+            return s
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;');
+        }
+
+        function colourLine(line) {
+            const escaped = escapeHtml(line);
+            for (const p of LOG_PATTERNS) {
+                if (p.re.test(line)) {
+                    return `<span class="${p.cls}">${escaped}</span>`;
+                }
+            }
+            return escaped;
+        }
+
+        async function refreshLogs() {
+            const panel = $('lms-log-panel');
+            if (!panel) return;
+            const filter = ($('lms-log-filter')?.value || '').trim();
+            const wasAtBottom =
+                panel.scrollHeight - panel.scrollTop - panel.clientHeight < 24;
+            const qs = new URLSearchParams({ lines: '180' });
+            if (filter) qs.set('filter', filter);
+            try {
+                const r = await fetch(`/api/lmstudio/logs?${qs}`);
+                if (!r.ok) throw new Error(`HTTP ${r.status}`);
+                const data = await r.json();
+                if (data.error) {
+                    panel.innerHTML = `<em>error: ${escapeHtml(data.error)}</em>`;
+                    return;
+                }
+                const lines = data.lines || [];
+                if (lines.length === 0) {
+                    panel.innerHTML = '<em>no matching lines.</em>';
+                    return;
+                }
+                panel.innerHTML = lines.map(colourLine).join('\n');
+                if (wasAtBottom) panel.scrollTop = panel.scrollHeight;
+            } catch (e) {
+                panel.innerHTML = `<em>error: ${escapeHtml(String(e))}</em>`;
+            }
+        }
+
+        function setFollow(on) {
+            if (logPollHandle) {
+                clearInterval(logPollHandle);
+                logPollHandle = null;
+            }
+            if (on) {
+                refreshLogs();
+                logPollHandle = setInterval(refreshLogs, 2000);
+            }
+        }
+
         function bind() {
             document.querySelectorAll('.lms-subtab-link').forEach(b => {
                 b.addEventListener('click', () => activateSubtab(b.dataset.subtab));
@@ -771,6 +851,18 @@ document.addEventListener('DOMContentLoaded', () => {
             if (benchRefresh) benchRefresh.addEventListener('click', refreshBenchmarks);
             const form = $('lms-load-form');
             if (form) form.addEventListener('submit', handleLoadSubmit);
+            const logRefresh = $('lms-log-refresh-btn');
+            if (logRefresh) logRefresh.addEventListener('click', refreshLogs);
+            const logFollow = $('lms-log-follow');
+            if (logFollow) logFollow.addEventListener('change', () => setFollow(logFollow.checked));
+            const logFilter = $('lms-log-filter');
+            if (logFilter) {
+                let debounce = null;
+                logFilter.addEventListener('input', () => {
+                    clearTimeout(debounce);
+                    debounce = setTimeout(refreshLogs, 250);
+                });
+            }
         }
 
         return {
@@ -779,6 +871,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 // Always refresh on open so reloads in LM Studio reflect immediately
                 refreshLoaded();
                 refreshBenchmarks();
+                // Kick off the log poller if "follow" is on (it is by default)
+                const follow = $('lms-log-follow');
+                setFollow(follow ? follow.checked : true);
+            },
+            deactivate() {
+                setFollow(false);
             },
         };
     })();

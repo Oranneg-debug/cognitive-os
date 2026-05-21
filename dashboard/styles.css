@@ -620,15 +620,21 @@ header {
     .lms-loaded   { grid-column: 1 / -1; }
     .lms-loadform { grid-column: 1; min-width: 0; }
     .lms-result   { grid-column: 2; min-width: 0; }
+    .lms-logs     { grid-column: 1 / -1; min-width: 0; }
 }
 
 @media (min-width: 1400px) {
     .lms-grid {
-        grid-template-columns: minmax(0, 5fr) minmax(0, 4fr) minmax(0, 3fr);
+        /* 4 zones: loaded | loadform | result | logs.
+           Logs takes the rightmost slot and stretches the full content height. */
+        grid-template-columns:
+            minmax(0, 4fr) minmax(0, 3fr) minmax(0, 3fr) minmax(0, 4fr);
+        grid-template-rows: auto auto;
     }
-    .lms-loaded   { grid-column: 1; }
-    .lms-loadform { grid-column: 2; min-width: 0; }
-    .lms-result   { grid-column: 3; min-width: 0; }
+    .lms-loaded   { grid-column: 1; grid-row: 1 / 3; }
+    .lms-loadform { grid-column: 2; grid-row: 1 / 3; min-width: 0; }
+    .lms-result   { grid-column: 3; grid-row: 1 / 3; min-width: 0; }
+    .lms-logs     { grid-column: 4; grid-row: 1 / 3; min-width: 0; }
 }
 
 .lms-bench-grid {
@@ -845,3 +851,64 @@ header {
 
 .lms-result-panel .lms-ok { color: var(--lms-gold); }
 .lms-result-panel .lms-err { color: #c41e3a; }
+
+/* ---- LM Studio runtime log tail ---- */
+.lms-card-controls {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.lms-log-filter {
+    background: var(--lms-panel-bg-deep);
+    border: 1px solid var(--lms-line);
+    color: var(--lms-ink);
+    font-family: inherit;
+    font-size: 0.75rem;
+    padding: 0.2rem 0.4rem;
+    width: clamp(7rem, 14vw, 14rem);
+    min-width: 0;
+}
+
+.lms-log-filter:focus {
+    outline: none;
+    border-color: var(--lms-gold-dim);
+}
+
+.lms-log-toggle {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    font-size: 0.72rem;
+    color: var(--lms-ink-dim);
+    letter-spacing: 0.04em;
+    cursor: pointer;
+}
+
+.lms-log-toggle input[type="checkbox"] {
+    accent-color: var(--lms-gold);
+    margin: 0;
+}
+
+.lms-log-panel {
+    background: var(--lms-panel-bg-deep);
+    border: none;
+    color: var(--lms-ink-dim);
+    padding: 0.5rem 0.75rem;
+    margin: 0;
+    font-family: inherit;
+    font-size: 0.74rem;
+    line-height: 1.4;
+    /* On widescreen, the panel takes the full grid row height (two rows of
+       cards stacked next to it). Fall back gracefully on small screens. */
+    max-height: clamp(20rem, 60vh, 70vh);
+    overflow: auto;
+    white-space: pre;
+    word-break: normal;
+}
+
+/* Highlight signal patterns the bench-runner SOP cares about. */
+.lms-log-panel .lms-log-hit  { color: var(--lms-gold); }
+.lms-log-panel .lms-log-warn { color: #c89a3a; }
+.lms-log-panel .lms-log-err  { color: #c41e3a; }
+.lms-log-panel em            { color: var(--lms-ink-dim); }

@@ -308,6 +308,58 @@ async def refresh_catalog():
     return {"count": len(keys), "model_keys": keys}
 
 
+@app.get("/api/lmstudio/logs")
+def lmstudio_logs(lines: int = 200, filter: Optional[str] = None):
+    """Tail the most-recently-modified LM Studio server log.
+
+    Args:
+        lines:  How many lines from the end to return. Capped at 2000.
+        filter: Optional substring filter (case-insensitive). Useful for
+                pulling only "LlamaV4::load", "pipeline parallelism",
+                "n_seq_max", etc. — the bench-runner SOP's signal patterns.
+    """
+    import glob
+
+    lines = max(1, min(int(lines), 2000))
+
+    log_dir = os.path.join(
+        os.environ.get("USERPROFILE", ""), ".lmstudio", "server-logs"
+    )
+    if not os.path.isdir(log_dir):
+        return {"file": None, "lines": [], "error": f"log dir not found: {log_dir}"}
+
+    candidates = glob.glob(os.path.join(log_dir, "**", "*.log"), recursive=True)
+    if not candidates:
+        return {"file": None, "lines": [], "error": "no .log files found"}
+
+    log_file = max(candidates, key=os.path.getmtime)
+    file_size = os.path.getsize(log_file)
+
+    # Read just the last ~lines*200 bytes (rough average line length) to avoid
+    # slurping a multi-megabyte log on every poll.
+    approx_tail = min(file_size, max(lines * 250, 16_384))
+    out: list[str] = []
+    try:
+        with open(log_file, "rb") as f:
+            f.seek(file_size - approx_tail)
+            raw = f.read().decode("utf-8", errors="replace")
+        # Drop the first partial line (we likely seeked into the middle of one)
+        chunks = raw.split("\n")[1:] if approx_tail < file_size else raw.split("\n")
+        if filter:
+            needle = filter.lower()
+            chunks = [c for c in chunks if needle in c.lower()]
+        out = chunks[-lines:]
+    except Exception as e:
+        return {"file": log_file, "lines": [], "error": repr(e)}
+
+    return {
+        "file": log_file,
+        "file_size": file_size,
+        "returned": len(out),
+        "lines": out,
+    }
+
+
 @app.get("/api/benchmarks")
 def benchmarks():
     """Return all rows of the bench results JSONL for the dashboard."""

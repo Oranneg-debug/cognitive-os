@@ -229,6 +229,27 @@
                                 </header>
                                 <pre id="lms-result-panel" class="lms-result-panel"><em>no requests yet.</em></pre>
                             </article>
+
+                            <!-- LM Studio runtime log tail -->
+                            <article class="lms-card lms-logs">
+                                <header class="lms-card-head">
+                                    <span class="lms-card-title">// lm studio log</span>
+                                    <span class="lms-card-controls">
+                                        <input type="text" id="lms-log-filter"
+                                            class="lms-log-filter"
+                                            placeholder="filter (e.g. LlamaV4)"
+                                            title="Case-insensitive substring filter on each line">
+                                        <label class="lms-log-toggle"
+                                            title="Auto-refresh every 2s">
+                                            <input type="checkbox" id="lms-log-follow" checked>
+                                            <span>follow</span>
+                                        </label>
+                                        <button id="lms-log-refresh-btn" class="lms-link-btn"
+                                            title="Refresh now">↻</button>
+                                    </span>
+                                </header>
+                                <pre id="lms-log-panel" class="lms-log-panel"><em>idle.</em></pre>
+                            </article>
                         </div>
                     </section>
 
