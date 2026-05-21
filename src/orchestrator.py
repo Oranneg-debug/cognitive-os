@@ -1,448 +1,134 @@
 import json
+import sys
 import textwrap
 import os
+from datetime import datetime
 from dotenv import load_dotenv
 import subprocess
 import re
+import yaml
+
+# Force UTF-8 on stdout/stderr so emoji-heavy log lines don't blow up under
+# Windows PowerShell's default cp1252 codec (Python 3.14 + LM Studio combo).
+# `errors='replace'` keeps a stray glyph from ever masking a real exception.
+for _stream in (sys.stdout, sys.stderr):
+    reconfigure = getattr(_stream, "reconfigure", None)
+    if reconfigure is not None:
+        try:
+            reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
 from src.llm_client import llm
 from src.memory_file_system import MemoryFileManager
 from src.sentry_router import SentryRouter
 from src.nft_agent import NFTAgent
-
-# ==============================================================================
-# 🧠 COGNITIVE OS - GLOBAL MODEL CONFIGURATION
-# ==============================================================================
-# Define all roles, their specific models, system prompts, and inference params here.
-# This makes it easy to change and maintain inference behavior across the entire script.
-
-
-# ================== BRAND GUARDRAILS (Universal) ==================
-BRAND_GUARDRAILS = textwrap.dedent("""\
-    ### BRAND GUARDRAILS (NON-NEGOTIABLE)
-    - **NO** empty shock value. Every provocative idea must serve:
-      - The Dark Maestro’s SovereignCompass™ (North: Sovereignty, South: Grit, East: Obscurity, West: Ritual)
-      - A clear narrative (e.g., "transcendence through decay")
-      - Or technical necessity (e.g., "this architecture prevents race conditions")
-    - **ALWAYS** justify *why* the idea aligns with the Maestro’s aesthetic (dark realism, gothic occult, biomechanical grit)
-    - **NEVER** violate: hate symbols, real-world religious iconography (unless recontextualized as *philosophical* metaphor), or culturally sacred symbols without deep justification.
-    """).strip()
-
-ROLES_CONFIG = {
-    # ================== BASE ROLES ==================
-    "simple": {
-        "model": "ministral-3-3b-instruct-2512",
-        "system_prompt": textwrap.dedent("""\
-            You are a fast, precise and very accurate assistant. Be concise.
-            Output ONLY valid JSON in this exact structure:
-            {
-                "response": "Your concise answer here.",
-                "action_taken": "Summary of action."
-            }"""),
-        "temperature": 0.4,
-        "top_p": 0.9,
-        "top_k": 30,
-        "repeat_penalty": 1.1,
-        "max_tokens": 4096,
-        "context_window": 131072,
-        "gpu_layers": -1,
-        "compass_weight": "IGNORE"
-    },
-    "standard": {
-        "model": "qwen3.5-9b-claude-4.6-highiq-instruct-heretic-uncensored",
-        "system_prompt": textwrap.dedent("""\
-            You are an expert software engineer and technical architect. Provide high-quality, production-ready code and balanced technical analysis.
-            """ + BRAND_GUARDRAILS + """
-            
-            # HANDOFF PROTOCOL
-            Output ONLY valid JSON:
-            {
-                "response": "Detailed analysis/code.",
-                "confidence": 0.9,
-                "requires_expertise": false
-            }"""),
-        "temperature": 0.7,
-        "top_p": 0.95,
-        "top_k": 40,
-        "repeat_penalty": 1.1,
-        "max_tokens": 8192,
-        "context_window": 262144,
-        "gpu_layers": 46,
-        "compass_weight": "IGNORE"
-    },
-    "vision": {
-        "model": "qwen3-vl-30b-a3b-instruct",
-        "system_prompt": textwrap.dedent("""\
-            You are an expert image analyst. Provide a detailed, accurate description and analysis of the provided image.
-            """ + BRAND_GUARDRAILS + """
-            
-            # HANDOFF PROTOCOL
-            Output ONLY valid JSON:
-            {
-                "analysis": "Visual description.",
-                "key_elements": ["list", "of", "items"],
-                "actionable_insights": ["insights"]
-            }"""),
-        "temperature": 0.2,
-        "top_p": 0.9,
-        "top_k": 40,
-        "repeat_penalty": 1.1,
-        "max_tokens": 4096,
-        "context_window": 262144,
-        "gpu_layers": -1,
-        "compass_weight": "IGNORE"
-    },
-    
-    # === BOARDROOM ROLES ===
-    "moderator": {
-        "model": "ministral-3-3b-instruct-2512",
-        "system_prompt": textwrap.dedent("""\
-            You are the Orchestrator Moderator — a neutral, efficient facilitator who ensures smooth role transitions.
-            
-            # HANDOFF PROTOCOL
-            Output ONLY valid JSON:
-            {
-                "next_role": "role_key",
-                "transition_reason": "Why this role is next.",
-                "context_summary": "Summary of current state."
-            }"""),
-        "temperature": 0.4,
-        "top_p": 0.9,
-        "top_k": 40,
-        "max_tokens": 512,
-        "context_window": 32768,
-        "gpu_layers": 0
-    },
-    "brand_guard": {
-        "model": "gemma-4-e4b-uncensored-hauhaucs-aggressive",
-        "system_prompt": textwrap.dedent("""\
-            You are the Brand Integrity Enforcer — guardian of narrative coherence and strategic alignment.
-            """ + BRAND_GUARDRAILS + """
-            
-            # HANDOFF PROTOCOL
-            Output ONLY valid JSON:
-            {
-                "approved": true,
-                "reasoning": "Brief explanation.",
-                "veto_points": ["reasons if any"],
-                "brand_risk_level": "low|medium|high"
-            }"""),
-        "temperature": 0.1,
-        "top_p": 0.9,
-        "top_k": 40,
-        "max_tokens": 512,
-        "context_window": 8192,
-        "gpu_layers": 0
-    },
-    "board_strategist": {
-        "model": "hermes-4-70b",
-        "system_prompt": textwrap.dedent("""\
-            ### SYSTEM ROLE: THE STRATEGIST (HERMES-4-70B)
-            You are the Executive Strategist / First Principles thinker of the "Dark Maestro" Boardroom.
-            
-            # HANDOFF PROTOCOL
-            Output ONLY valid JSON:
-            {
-                "strategic_view": "Your vision.",
-                "key_levers": ["list of levers"],
-                "veto_points": [],
-                "next_step": "Proposed path."
-            }"""),
-        "temperature": 0.7,
-        "top_p": 0.9,
-        "top_k": 40,
-        "repeat_penalty": 1.1,
-        "max_tokens": 16384,
-        "context_window": 65536,
-        "gpu_layers": 74,
-        "compass_weight": "HIGH WEIGHT"
-    },
-    "board_specialist": {
-        "model": "qwen3.6-27b-heretic-uncensored-finetune-neo-code-di-imatrix-max",
-        "system_prompt": textwrap.dedent("""\
-            ### SYSTEM ROLE: THE SPECIALIST (QWEN3.6-27B)
-            You are the Technical / Executor Specialist for the "Dark Maestro" Boardroom.
-            
-            # HANDOFF PROTOCOL
-            Output ONLY valid JSON:
-            {
-                "technical_analysis": "Precision detail.",
-                "actionable_steps": ["step 1", "step 2"],
-                "veto_points": [],
-                "next_step": "Refinement suggestion."
-            }"""),
-        "temperature": 0.2,
-        "top_p": 0.8,
-        "top_k": 20,
-        "repeat_penalty": 1.1,
-        "max_tokens": 16384,
-        "context_window": 32768,
-        "gpu_layers": -1,
-        "compass_weight": "MEDIUM WEIGHT"
-    },
-    "board_critic": {
-        "model": "deepseek-r1-distill-qwen-32b-uncensored",
-        "system_prompt": textwrap.dedent("""\
-            ### SYSTEM ROLE: THE CRITIC (DEEPSEEK-R1-32B)
-            You are the Ruthless Critic / Contrarian of the "Dark Maestro" Boardroom.
-            
-            # HANDOFF PROTOCOL
-            Output ONLY valid JSON:
-            {
-                "veto_points": [{"type": "logic|aesthetic|technical", "risk_level": "low|medium|high", "description": "..."}],
-                "critical_feedback": "Detailed breakdown.",
-                "next_step": "Mitigation request."
-            }"""),
-        "temperature": 0.1,
-        "top_p": 0.9,
-        "top_k": 40,
-        "repeat_penalty": 1.1,
-        "max_tokens": 8192,
-        "context_window": 65536,
-        "gpu_layers": -1,
-        "compass_weight": "IGNORE"
-    },
-    "board_creative": {
-        "model": "hermes-4.3-36b",
-        "system_prompt": textwrap.dedent("""\
-            ### SYSTEM ROLE: THE CREATIVE (HERMES-4.3-36B)
-            You are the Creative Expansionist for the "Dark Maestro" Boardroom.
-            """ + BRAND_GUARDRAILS + """
-            
-            # HANDOFF PROTOCOL
-            Output ONLY valid JSON:
-            {
-                "creative_vision": "Provocative idea.",
-                "style_notes": "Aesthetic cues.",
-                "veto_points": [],
-                "next_step": "Expansion."
-            }"""),
-        "temperature": 1.1,
-        "top_p": 0.95,
-        "top_k": 50,
-        "repeat_penalty": 1.1,
-        "max_tokens": 16384,
-        "context_window": 65536,
-        "gpu_layers": -1,
-        "compass_weight": "MAXIMUM WEIGHT"
-    },
-    "board_logical": {
-        "model": "gemma-4-31b-it",
-        "system_prompt": textwrap.dedent("""\
-            ### SYSTEM ROLE: THE LOGICAL (GEMMA-4-31B)
-            You are the Formalist Outsider and Scribe.
-            
-            # HANDOFF PROTOCOL
-            Output ONLY valid JSON:
-            {
-                "logical_structure": "Step-by-step proof.",
-                "validity_score": 1.0,
-                "veto_points": [],
-                "next_step": "Decision point."
-            }"""),
-        "temperature": 0.1,
-        "top_p": 0.8,
-        "top_k": 20,
-        "repeat_penalty": 1.1,
-        "max_tokens": 16384,
-        "context_window": 128000,
-        "gpu_layers": -1,
-        "compass_weight": "LOW WEIGHT"
-    },
-    "board_chairman": {
-        "model": "hermes-4-70b",
-        "system_prompt": textwrap.dedent("""\
-            ### SYSTEM ROLE: THE GOD-TIER CHAIRMAN (HERMES-4-70B)
-            You are the ultimate authority. Reconcile all inputs through the Sovereign Compass.
-            
-            # HANDOFF PROTOCOL
-            Output ONLY valid JSON:
-            {
-                "audit_report": "What was missed.",
-                "definitive_blueprint": "The path forward.",
-                "final_decision": "The verdict.",
-                "veto_points": []
-            }"""),
-        "temperature": 0.4,
-        "top_p": 0.9,
-        "top_k": 40,
-        "repeat_penalty": 1.1,
-        "max_tokens": 16384,
-        "context_window": 81920,
-        "gpu_layers": 75,
-        "compass_weight": "MAXIMUM WEIGHT"
-    },
-
-    # === TECHNICAL MEETING ===
-    "technical_specialist": {
-        "model": "qwen3.6-27b-heretic-uncensored-finetune-neo-code-di-imatrix-max",
-        "system_prompt": "Identical to board_specialist logic.",
-        "temperature": 0.2,
-        "top_p": 0.8,
-        "top_k": 20,
-        "repeat_penalty": 1.1,
-        "max_tokens": 16384,
-        "context_window": 32768,
-        "gpu_layers": -1,
-        "compass_weight": "IGNORE"
-    },
-    "technical_creative": {
-        "model": "hermes-4.3-36b",
-        "system_prompt": textwrap.dedent("""\
-            ### SYSTEM ROLE: THE TECHNICAL CREATIVE (HERMES-4.3-36B)
-            """ + BRAND_GUARDRAILS + """
-            
-            # HANDOFF PROTOCOL
-            Output ONLY valid JSON:
-            {
-                "architectural_innovation": "Novel technical approach.",
-                "veto_points": [],
-                "next_step": "Feasibility audit."
-            }"""),
-        "temperature": 1.1,
-        "top_p": 0.95,
-        "top_k": 50,
-        "repeat_penalty": 1.1,
-        "max_tokens": 16384,
-        "context_window": 65536,
-        "gpu_layers": -1,
-        "compass_weight": "MEDIUM WEIGHT"
-    },
-    "technical_critic": {
-        "model": "deepseek-r1-distill-qwen-32b-uncensored",
-        "system_prompt": "Identical to board_critic logic.",
-        "temperature": 0.1,
-        "top_p": 0.9,
-        "top_k": 40,
-        "repeat_penalty": 1.1,
-        "max_tokens": 8192,
-        "context_window": 65536,
-        "gpu_layers": -1,
-        "compass_weight": "IGNORE"
-    },
-    "technical_overseer": {
-        "model": "qwen3.5-35b-a3b-uncensored-hauhaucs-aggressive",
-        "system_prompt": textwrap.dedent("""\
-            ### SYSTEM ROLE: THE TECHNICAL OVERSEER (QWEN3.5-35B-MOE)
-            Audit the technical logic. Reconcile Specialist and Creative.
-            
-            # HANDOFF PROTOCOL
-            Output ONLY valid JSON:
-            {
-                "audit_report": "Technical gaps.",
-                "definitive_blueprint": "Verified logic.",
-                "veto_points": []
-            }"""),
-        "temperature": 0.4,
-        "top_p": 0.9,
-        "top_k": 40,
-        "repeat_penalty": 1.1,
-        "max_tokens": 16384,
-        "context_window": 98304,
-        "gpu_layers": -1,
-        "compass_weight": "HIGH WEIGHT"
-    },
-
-    # === DESIGN MEETING ===
-    "design_junior": {
-        "model": "ministral-3-14b-instruct-2512",
-        "system_prompt": textwrap.dedent("""\
-            ### SYSTEM ROLE: DESIGN JUNIOR (MINISTRAL-14B)
-            Translate project data into 3 concepts.
-            
-            # HANDOFF PROTOCOL
-            Output ONLY valid JSON:
-            {
-                "concepts": [{"design_title": "...", "narrative_hook": "...", "visual_reference_prompt": "..."}]
-            }"""),
-        "temperature": 0.7,
-        "top_p": 0.9,
-        "top_k": 50,
-        "repeat_penalty": 1.1,
-        "max_tokens": 16384,
-        "context_window": 32768,
-        "gpu_layers": 0,
-        "compass_weight": "HIGH WEIGHT"
-    },
-    "design_creative": {
-        "model": "hermes-4.3-36b",
-        "system_prompt": "Identical to board_creative with aesthetic focus.",
-        "temperature": 1.1,
-        "top_p": 0.95,
-        "top_k": 50,
-        "repeat_penalty": 1.1,
-        "max_tokens": 16384,
-        "context_window": 32768,
-        "gpu_layers": -1,
-        "compass_weight": "MAXIMUM WEIGHT"
-    },
-    "design_critic": {
-        "model": "deepseek-r1-distill-qwen-32b-uncensored",
-        "system_prompt": "Identical to board_critic with aesthetic focus.",
-        "temperature": 0.1,
-        "top_p": 0.9,
-        "top_k": 40,
-        "repeat_penalty": 1.1,
-        "max_tokens": 16384,
-        "context_window": 65536,
-        "gpu_layers": -1,
-        "compass_weight": "HIGH WEIGHT"
-    },
-    "design_senior": {
-        "model": "qwen3.6-27b-heretic-uncensored-finetune-neo-code-di-imatrix-max",
-        "system_prompt": textwrap.dedent("""\
-            ### SYSTEM ROLE: SENIOR ART DIRECTOR (QWEN3.6-27B)
-            Final synth and image prompt engineering.
-            
-            # HANDOFF PROTOCOL
-            Output ONLY valid JSON:
-            {
-                "final_concepts": [...],
-                "image_prompts": {"midjourney": "...", "flux": "...", "sdxl": "..."},
-                "social_media_strategy": "..."
-            }"""),
-        "temperature": 0.6,
-        "top_p": 0.9,
-        "top_k": 50,
-        "repeat_penalty": 1.1,
-        "max_tokens": 6828,
-        "context_window": 98304,
-        "gpu_layers": -1,
-        "compass_weight": "MAXIMUM WEIGHT"
-    },
-    "scribe": {
-        "model": "ministral-3-3b-instruct-2512",
-        "system_prompt": "Distill deliberation into a beautiful markdown report.",
-        "temperature": 0.3,
-        "top_p": 0.9,
-        "top_k": 40,
-        "repeat_penalty": 1.1,
-        "max_tokens": 4096,
-        "context_window": 32768,
-        "gpu_layers": -1,
-        "compass_weight": "IGNORE"
-    },
-    "nft_specialist": {
-        "model": "qwen3-coder-next",
-        "system_prompt": "NFT metadata specialist.",
-        "temperature": 0.4,
-        "top_p": 0.9,
-        "top_k": 40,
-        "repeat_penalty": 1.1,
-        "max_tokens": 4096,
-        "context_window": 32768,
-        "gpu_layers": 46,
-        "compass_weight": "HIGH WEIGHT"
-    }
-}
+from src.document_processor import extract_text_from_pdf
 
 
 # ==============================================================================
+# 🧠 COGNITIVE OS - EMBEDDER OPTIMIZATION HELPERS
+# ==============================================================================
+
+def _flush_embedder():
+    """Flush the embedder model from VRAM. Call this before operations that need heavy model loading."""
+    print("[EMBEDDER] Flushing embedder from VRAM...")
+    llm.eject_all_models()
+
+# ==============================================================================
+# 🧠 COGNITIVE OS - MASTER CONFIGURATION LOADER (LIVE RELOAD)
+# ==============================================================================
+class MasterConfig:
+    _instance = None
+    _config = None
+    _last_modified_time = None
+    _config_path = os.path.join(os.path.dirname(__file__), '..', 'dev', 'master_config.md')
+
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super(MasterConfig, cls).__new__(cls)
+            cls._load_config()
+        return cls._instance
+
+    @classmethod
+    def _load_config(cls):
+        """Loads or reloads the master config from the YAML file."""
+        try:
+            with open(cls._config_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            
+            # Extract the YAML block
+            yaml_match = re.search(r'```yaml\n(.*?)\n```', content, re.DOTALL)
+            if not yaml_match:
+                raise ValueError("Could not find a YAML code block in master_config.md")
+            
+            yaml_content = yaml_match.group(1)
+            cls._config = yaml.safe_load(yaml_content)
+            cls._last_modified_time = os.path.getmtime(cls._config_path)
+            print("[OK] Master config loaded successfully.")
+
+        except Exception as e:
+            # Never let the diagnostic print itself raise (e.g. encoding issues)
+            # — the real exception below is what matters.
+            try:
+                print(f"[FATAL] Could not load master_config.md: {e!r}")
+            except Exception:
+                pass
+            # Fallback to an empty config to prevent crashing the whole system
+            cls._config = {"models": {}, "roles": {}, "model_presets": []}
+
+    @classmethod
+    def get_config(cls) -> dict:
+        """
+        Returns the current configuration, reloading if the file has changed.
+        """
+        try:
+            current_mod_time = os.path.getmtime(cls._config_path)
+            if cls._last_modified_time is None or current_mod_time > cls._last_modified_time:
+                print("🔄 master_config.md has changed. Reloading...")
+                cls._load_config()
+        except FileNotFoundError:
+            print(f"🚨 WARNING: master_config.md not found at {cls._config_path}. Using cached or empty config.")
+        
+        return cls._config
+
+def get_config() -> dict:
+    """Singleton accessor for the master config."""
+    return MasterConfig().get_config()
+
+def get_role_config(role_key: str) -> dict:
+    """Get the full configuration for a specific role from the master config."""
+    config = get_config()
+    roles = config.get("roles", {})
+    if role_key in roles:
+        # Inherit base model parameters
+        role_info = roles[role_key]
+        model_name = role_info.get("model")
+        if model_name:
+            models = config.get("models", {})
+            base_model_config = models.get(model_name, {})
+            # Role-specific params override model defaults
+            return {**base_model_config, **role_info}
+    raise ValueError(f"Role '{role_key}' not found in master_config.md")
+
+def get_model_presets() -> list:
+    """Get all available model presets from the master config."""
+    return get_config().get("model_presets", [])
 
 class Orchestrator:
     def __init__(self):
         load_dotenv()
         self.sentry = SentryRouter()
         self.memory = MemoryFileManager()
+        # Initialize config on startup
+        get_config()
+        
+        # Ensure a clean slate on startup by flushing ALL models (including embedder)
+        print("🧹 Performing startup VRAM flush (Absolute)...")
+        try:
+            llm.eject_all_models(force_all=True)
+        except Exception as e:
+            print(f"⚠️ Startup flush failed (LM Studio might not be fully ready yet): {e}")
 
     def _load_sovereign_compass(self) -> str:
         compass_path = os.getenv("SOVEREIGN_COMPASS_PATH")
@@ -459,7 +145,6 @@ class Orchestrator:
         compass = self._load_sovereign_compass()
         
         if compass:
-            # Use override if provided and not "DEFAULT", otherwise use role's weight
             weight = weight_override if weight_override and weight_override != "DEFAULT" else role_config.get("compass_weight", "IGNORE")
             
             if weight in ["IGNORE", "NONE", None]:
@@ -469,9 +154,7 @@ class Orchestrator:
         return system_prompt
 
     def _extract_json(self, text: str) -> dict:
-        """Extracts JSON from text using regex, handling potential LLM noise."""
         try:
-            # Look for the last JSON-like block in the response
             match = re.search(r'\{.*\}', text, re.DOTALL)
             if match:
                 return json.loads(match.group(0))
@@ -549,7 +232,7 @@ class Orchestrator:
         
         return "\n".join(history_lines)
 
-    def _execute_orchestrated_meeting(self, task_id: str, user_input: str, role_sequence: list, synthesis_role: str, progress_callback=None, compass_weight=None, image_base64=None) -> str:
+    def _execute_orchestrated_meeting(self, task_id: str, user_input: str, role_sequence: list, synthesis_role: str, progress_callback=None, compass_weight=None, image_base64=None, source_file_path: str = None) -> str:
         """
         Production-grade meeting execution with JSON handoffs, sequential context passing, and Brand Guard audits.
         Each agent now builds upon or critiques the previous opinions in the meeting history.
@@ -563,27 +246,36 @@ class Orchestrator:
         llm.eject_all_models()
         
         # 1. Moderator Framing
-        mod_config = ROLES_CONFIG["moderator"]
-        msg_mod = "[MODERATOR] Moderator is framing the discussion..."
-        if progress_callback: progress_callback(msg_mod)
-        
-        mod_response = llm.generate_response(
-            prompt=f"Task: {user_input}\nFrame the meeting and assign the first speaker from: {', '.join(role_sequence)}",
-            system_prompt=mod_config["system_prompt"],
-            model=mod_config["model"],
-            temperature=mod_config["temperature"],
-            max_tokens=mod_config["max_tokens"],
-            gpu_layers=mod_config["gpu_layers"]
-        )
-        mod_data = self._extract_json(mod_response)
-        self.memory.save_opinion(task_id, "moderator", mod_config["model"], json.dumps(mod_data))
+        mod_config = get_role_config("moderator")
+        if mod_config.get("enabled", True):
+            msg_mod = "[MODERATOR] Moderator is framing the discussion..."
+            if progress_callback: progress_callback(msg_mod)
+            
+            mod_response = llm.generate_response(
+                prompt=f"Task: {user_input}\nFrame the meeting and assign the first speaker from: {', '.join(role_sequence)}",
+                system_prompt=mod_config["system_prompt"],
+                model=mod_config["model"],
+                temperature=mod_config.get("temperature", 0.4),
+                max_tokens=mod_config.get("max_tokens", 512),
+                gpu_layers=mod_config.get("gpu_layers", 0)
+            )
+            mod_data = self._extract_json(mod_response)
+            self.memory.save_opinion(task_id, "moderator", mod_config["model"], json.dumps(mod_data))
+        else:
+            print("[MODERATOR] Skipped (disabled in config).")
         
         # Initialize meeting history for context
         meeting_history = self._format_meeting_history(task_id)
 
         # 2. Sequential Deliberation with Brand Guard Audit and Sequential Context
         for idx, role_key in enumerate(role_sequence):
-            c = ROLES_CONFIG[role_key]
+            c = get_role_config(role_key)
+            if not c.get("enabled", True):
+                msg_skip = f"[AGENT] {role_key.upper()} is disabled. Skipping..."
+                print(f"--> {msg_skip}")
+                if progress_callback: progress_callback(msg_skip)
+                continue
+
             msg_role = f"[AGENT] {role_key.upper()} is deliberating..."
             print(f"--> {msg_role}")
             if progress_callback: progress_callback(msg_role)
@@ -610,13 +302,13 @@ INSTRUCTIONS:
                 prompt=f"Context: {user_input}\nDeliberate on your specific area.\n\n{sequential_context}",
                 system_prompt=self._inject_compass(c, weight_override=compass_weight),
                 model=c["model"],
-                temperature=c["temperature"],
-                top_p=c["top_p"],
-                top_k=c["top_k"],
-                repeat_penalty=c["repeat_penalty"],
-                max_tokens=c["max_tokens"],
-                context_window=c["context_window"],
-                gpu_layers=c["gpu_layers"],
+                temperature=c.get("temperature", 0.7),
+                top_p=c.get("top_p", 0.9),
+                top_k=c.get("top_k", 40),
+                repeat_penalty=c.get("repeat_penalty", 1.1),
+                max_tokens=c.get("max_tokens", 8192),
+                context_window=c.get("context_window", 32768),
+                gpu_layers=c.get("gpu_layers", -1),
                 image_base64=image_base64 if idx == 0 else None # Only first agent sees image if provided
             )
             parsed_agent = self._extract_json(agent_opinion)
@@ -626,25 +318,30 @@ INSTRUCTIONS:
             meeting_history = self._format_meeting_history(task_id)
             
             # Brand Guard Audit
-            bg_config = ROLES_CONFIG["brand_guard"]
-            msg_bg = f"[BRAND_GUARD] Brand Guard is auditing {role_key.upper()}..."
-            if progress_callback: progress_callback(msg_bg)
-            
-            bg_response = llm.generate_response(
-                prompt=f"Audit this output: {json.dumps(parsed_agent)}",
-                system_prompt=bg_config["system_prompt"],
-                model=bg_config["model"],
-                temperature=bg_config["temperature"],
-                max_tokens=bg_config["max_tokens"],
-                gpu_layers=bg_config["gpu_layers"]
-            )
-            bg_data = self._extract_json(bg_response)
-            self.memory.save_opinion(task_id, f"brand_guard_{role_key}", bg_config["model"], json.dumps(bg_data))
-            
-            if not bg_data.get("approved", True):
-                msg_veto = f"[VETO] BRAND VETO on {role_key}: {bg_data.get('reasoning', 'No reason provided')}"
-                print(msg_veto)
-                if progress_callback: progress_callback(msg_veto)
+            bg_config = get_role_config("brand_guard")
+            if bg_config.get("enabled", True):
+                msg_bg = f"[BRAND_GUARD] Brand Guard is auditing {role_key.upper()}..."
+                if progress_callback: progress_callback(msg_bg)
+                
+                bg_response = llm.generate_response(
+                    prompt=f"Audit this output: {json.dumps(parsed_agent)}",
+                    system_prompt=bg_config["system_prompt"],
+                    model=bg_config["model"],
+                    temperature=bg_config.get("temperature", 0.1),
+                    max_tokens=bg_config.get("max_tokens", 512),
+                    gpu_layers=bg_config.get("gpu_layers", 0)
+                )
+                bg_data = self._extract_json(bg_response)
+                self.memory.save_opinion(task_id, f"brand_guard_{role_key}", bg_config["model"], json.dumps(bg_data))
+                
+                if not bg_data.get("approved", True):
+                    msg_veto = f"[VETO] BRAND VETO on {role_key}: {bg_data.get('reasoning', 'No reason provided')}"
+                    print(msg_veto)
+                    if progress_callback: progress_callback(msg_veto)
+            else:
+                msg_bg_skip = f"[BRAND_GUARD] Audit skipped for {role_key.upper()} (disabled)."
+                print(f"--> {msg_bg_skip}")
+                if progress_callback: progress_callback(msg_bg_skip)
             
             llm.eject_all_models()
 
@@ -656,10 +353,17 @@ INSTRUCTIONS:
         final_meeting_history = self._format_meeting_history(task_id)
         
         opinions = self.memory.get_all_opinions(task_id)
-        c = ROLES_CONFIG[synthesis_role]
+        c = get_role_config(synthesis_role)
         
-        final_opinion = llm.generate_response(
-            prompt=f"""Synthesize the meeting history and provide the definitive blueprint.
+        if c.get("enabled", True):
+            # Synthesis call is the load-bearing step of every orchestration —
+            # if it raises, we MUST still persist an audit trail (the upstream
+            # bug was a silent-drop: exceptions bubbled up, the caller's
+            # finally-block archived the task with status=completed, and
+            # oversight_analysis stayed empty with no log line to explain why).
+            try:
+                final_opinion = llm.generate_response(
+                    prompt=f"""Synthesize the meeting history and provide the definitive blueprint.
 
 ORIGINAL TASK:
 {user_input}
@@ -674,31 +378,54 @@ INSTRUCTIONS:
 - Generate a definitive, actionable output that reconciles all perspectives
 
 Output your final blueprint in the specified JSON format for your role.""",
-            system_prompt=self._inject_compass(c, weight_override=compass_weight),
-            model=c["model"],
-            temperature=c["temperature"],
-            top_p=c["top_p"],
-            top_k=c["top_k"],
-            repeat_penalty=c["repeat_penalty"],
-            max_tokens=c["max_tokens"],
-            context_window=c["context_window"],
-            gpu_layers=c["gpu_layers"]
-        )
-        self.memory.save_oversight_analysis(task_id, final_opinion)
+                    system_prompt=self._inject_compass(c, weight_override=compass_weight),
+                    model=c["model"],
+                    temperature=c.get("temperature", 0.7),
+                    top_p=c.get("top_p", 0.9),
+                    top_k=c.get("top_k", 40),
+                    repeat_penalty=c.get("repeat_penalty", 1.1),
+                    max_tokens=c.get("max_tokens", 8192),
+                    context_window=c.get("context_window", 32768),
+                    gpu_layers=c.get("gpu_layers", -1)
+                )
+            except Exception as synth_exc:
+                import traceback
+                final_opinion = json.dumps({
+                    "error": f"Synthesis call raised: {synth_exc!r}",
+                    "synthesis_role": synthesis_role,
+                    "traceback": traceback.format_exc(limit=4),
+                })
+                err_msg = (
+                    f"[SYNTHESIS] ❌ {synthesis_role.upper()} raised "
+                    f"{type(synth_exc).__name__}: {synth_exc}"
+                )
+                print(err_msg)
+                if progress_callback: progress_callback(err_msg)
+            self.memory.save_oversight_analysis(task_id, final_opinion)
+        else:
+            final_opinion = '{"error": "Synthesis role disabled in config."}'
+            print(f"[SYNTHESIS] {synthesis_role.upper()} skipped (disabled).")
+            # Persist the disabled state explicitly so it's auditable rather
+            # than indistinguishable from a hard-crashed run.
+            self.memory.save_oversight_analysis(task_id, final_opinion)
         
         # 4. Scribe Synthesis
         msg_scribe = "[SCRIBE] Scribe is generating the master report..."
         if progress_callback: progress_callback(msg_scribe)
         
-        s_config = ROLES_CONFIG["scribe"]
-        report = llm.generate_response(
-            prompt=f"Original Task: {user_input}\nFinal Verdict: {final_opinion}\n\nMeeting History:\n{final_meeting_history}\n\nGenerate a master markdown report that captures the full deliberation process and the definitive outcome.",
-            system_prompt=s_config["system_prompt"],
-            model=s_config["model"],
-            temperature=s_config["temperature"],
-            max_tokens=s_config["max_tokens"],
-            gpu_layers=s_config["gpu_layers"]
-        )
+        s_config = get_role_config("scribe")
+        if s_config.get("enabled", True):
+            report = llm.generate_response(
+                prompt=f"Original Task: {user_input}\nFinal Verdict: {final_opinion}\n\nMeeting History:\n{final_meeting_history}\n\nGenerate a master markdown report that captures the full deliberation process and the definitive outcome.",
+                system_prompt=s_config["system_prompt"],
+                model=s_config["model"],
+                temperature=s_config.get("temperature", 0.3),
+                max_tokens=s_config.get("max_tokens", 4096),
+                gpu_layers=s_config.get("gpu_layers", -1)
+            )
+        else:
+            report = f"Scribe role is disabled. Raw final verdict:\n{final_opinion}"
+            print("[SCRIBE] Skipped (disabled).")
         
         self.memory.complete_task(task_id)
         self._restore_default_state(progress_callback)
@@ -710,7 +437,7 @@ Output your final blueprint in the specified JSON format for your role.""",
         # Flush the heavy models first!
         llm.eject_all_models()
         
-        model_id = ROLES_CONFIG["simple"]["model"]
+        model_id = get_role_config("simple")["model"]
         msg = f"🔄 Restoring default boot LLM to VRAM..."
         print(f"--> {msg}")
         if progress_callback: progress_callback(msg)
@@ -722,9 +449,21 @@ Output your final blueprint in the specified JSON format for your role.""",
             stderr=subprocess.DEVNULL,
             shell=True
         )
-        
-    def process_request(self, user_input: str, image_base64: str = None, progress_callback=None, compass_weight: str = None):
-            
+
+    def process_request(self, user_input: str, image_base64: str = None, progress_callback=None, compass_weight: str = None, model_presets: list = None, document_base64: str = None, is_pdf: bool = False, source_file_path: str = None):
+        # Handle PDF document processing if provided
+        if is_pdf and document_base64:
+            try:
+                pdf_text = extract_text_from_pdf(document_base64)
+                # Ensure the routing prefix remains at the start of the string!
+                user_input = f"{user_input}\n\n[Attached PDF Content:]\n\n{pdf_text}"
+                if progress_callback: progress_callback("[DOC_PROCESSOR] PDF content extracted and added to input.")
+            except ValueError as e:
+                error_msg = f"[DOC_PROCESSOR_ERROR] Failed to process PDF: {e}"
+                print(error_msg)
+                if progress_callback: progress_callback(error_msg)
+                return error_msg # Return error if PDF processing fails
+
         # 1. Routing
         classification = self.sentry.classify_request(user_input)
         pattern = classification["pattern"]
@@ -732,102 +471,133 @@ Output your final blueprint in the specified JSON format for your role.""",
         print(msg)
         if progress_callback: progress_callback(msg)
         
-        # 2. Vision Pre-Processing for Non-Vision Councils
-        if image_base64 and pattern in ["TECHNICAL_MEETING", "SEQUENTIAL_BOARDROOM", "STANDARD", "DESIGN_MEETING"]:
-            msg_vision = f"👁️ Non-vision council selected. Auto-translating image to text..."
-            print(f"--> {msg_vision}")
-            if progress_callback: progress_callback(msg_vision)
-            
-            image_description = self.execute_vision("Please describe this image in extreme detail so that a text-only AI council can understand it perfectly.", image_base64, progress_callback, compass_weight=compass_weight)
-            user_input = f"{user_input}\n\n[Auto-Generated Image Description for Context]:\n{image_description}"
-            image_base64 = None # Consume the image
-            
-        # 3. Execution
+        # 2. Execution
         if pattern == "SIMPLE":
             if image_base64:
-                return self.execute_vision(user_input, image_base64, progress_callback, compass_weight=compass_weight)
-            return self.execute_simple(user_input, compass_weight=compass_weight)
+                return self.execute_vision(user_input, image_base64, progress_callback, compass_weight=compass_weight, source_file_path=source_file_path)
+            return self.execute_simple(user_input, compass_weight=compass_weight, source_file_path=source_file_path)
         elif pattern == "STANDARD":
-            return self.execute_standard(user_input, compass_weight=compass_weight)
+            return self.execute_standard(user_input, compass_weight=compass_weight, source_file_path=source_file_path)
         elif pattern == "SEQUENTIAL_BOARDROOM" or pattern == "ONLINE_BOARDROOM":
             if pattern == "ONLINE_BOARDROOM":
                 msg_fallback = "⚠️  [Notice: Online API models not yet hooked up. Falling back to Local SEQUENTIAL_BOARDROOM for testing]"
                 print(msg_fallback)
                 if progress_callback: progress_callback(msg_fallback)
-            return self.execute_sequential_boardroom(user_input, progress_callback, compass_weight=compass_weight)
+            return self.execute_sequential_boardroom(user_input, progress_callback, compass_weight=compass_weight, source_file_path=source_file_path)
+        elif pattern == "ORACLE_COUNCIL":
+            return self.execute_oracle_council(user_input, progress_callback, compass_weight=compass_weight, source_file_path=source_file_path)
         elif pattern == "TECHNICAL_MEETING":
-            return self.execute_technical_meeting(user_input, progress_callback, compass_weight=compass_weight)
+            return self.execute_technical_meeting(user_input, progress_callback, compass_weight=compass_weight, source_file_path=source_file_path)
         elif pattern == "DESIGN_MEETING":
-            return self.execute_design_meeting(user_input, image_base64, progress_callback, compass_weight=compass_weight)
+            return self.execute_design_meeting(user_input, image_base64, progress_callback, compass_weight=compass_weight, source_file_path=source_file_path)
         elif pattern == "NFT_CREATION":
-            return self.execute_nft_creation(user_input, progress_callback, compass_weight=compass_weight)
+            return self.execute_nft_creation(user_input, progress_callback, compass_weight=compass_weight, source_file_path=source_file_path)
+        elif pattern == "DEVELOPMENT_LIFECYCLE":
+            from src.dev_route import DevRouteManager
+            dev_manager = DevRouteManager()
+            
+            # Clean the input to remove the trigger tag
+            clean_input = re.sub(r'#dev|/dev', '', user_input, flags=re.IGNORECASE).strip()
+            
+            if not clean_input:
+                 return "Error: Please provide a description for your proposal along with the tag."
+                 
+            print("📝 Creating new development proposal from request...")
+            # Forward source_file_path so the proposal can link back to the
+            # originating Obsidian note (e.g. a message under AI-Help/cognitive-os).
+            result = dev_manager.process_dev_proposal(
+                clean_input,
+                origin="Obsidian-Plugin",
+                source_file_path=source_file_path
+            )
+            source_note = os.path.splitext(os.path.basename(source_file_path))[0] if source_file_path else None
+            source_msg = f"\nSource note: [[{source_note}]]" if source_note else ""
+            return f"✅ Proposal Created: {result['proposal_id']}\nStatus: Added to Kanban Backlog.{source_msg}"
         else:
             return f"Pattern {pattern} is not yet fully implemented locally."
-            
-    def execute_simple(self, user_input: str, compass_weight: str = None) -> str:
-        """Single model pass (Reflex Layer). Fast, agentic."""
-        c = ROLES_CONFIG["simple"]
-        return llm.generate_response(
-            prompt=user_input, 
-            system_prompt=self._inject_compass(c, weight_override=compass_weight), 
-            model=c["model"],
-            temperature=c["temperature"],
-            top_p=c["top_p"],
-            top_k=c["top_k"],
-            repeat_penalty=c["repeat_penalty"],
-            max_tokens=c["max_tokens"],
-            context_window=c["context_window"],
-            gpu_layers=c["gpu_layers"]
-        )
 
-    def execute_standard(self, user_input: str, compass_weight: str = None) -> str:
-        """Single model + preset (Operational Brain)."""
-        c = ROLES_CONFIG["standard"]
-        return llm.generate_response(
-            prompt=user_input, 
-            system_prompt=self._inject_compass(c, weight_override=compass_weight), 
+    def execute_simple(self, user_input: str, progress_callback=None, compass_weight: str = None, image_base64: str = None, source_file_path: str = None) -> str:
+        """
+        Basic single-model query for low-complexity tasks. No complex orchestration.
+        """
+        # This will be a direct call to the LLM, not _execute_orchestrated_meeting
+        # Add logic to handle source_file_path if needed for simple pattern output
+        # For now, just pass user_input directly
+        print("[SIMPLE] Executing simple request...")
+        c = get_role_config("simple")
+        response = llm.generate_response(
+            prompt=user_input,
+            system_prompt=self._inject_compass(c, weight_override=compass_weight),
             model=c["model"],
-            temperature=c["temperature"],
-            top_p=c["top_p"],
-            top_k=c["top_k"],
-            repeat_penalty=c["repeat_penalty"],
-            max_tokens=c["max_tokens"],
-            context_window=c["context_window"],
-            gpu_layers=c["gpu_layers"]
-        )
-
-    def execute_vision(self, user_input: str, image_base64: str, progress_callback=None, compass_weight: str = None) -> str:
-        """Process image payloads using the specialized vision model."""
-        c = ROLES_CONFIG["vision"]
-        
-        msg_eject = "🧹 Ejecting active models for Vision analysis..."
-        print(f"--> {msg_eject}")
-        if progress_callback: progress_callback(msg_eject)
-        llm.eject_all_models()
-        
-        msg_load = f"👁️ Loading Vision Model: {c['model']}"
-        print(f"--> {msg_load}")
-        if progress_callback: progress_callback(msg_load)
-        
-        result = llm.generate_response(
-            prompt=user_input, 
-            system_prompt=self._inject_compass(c, weight_override=compass_weight), 
-            model=c["model"],
-            temperature=c["temperature"],
-            top_p=c["top_p"],
-            top_k=c["top_k"],
-            repeat_penalty=c["repeat_penalty"],
-            max_tokens=c["max_tokens"],
-            context_window=c["context_window"],
-            gpu_layers=c["gpu_layers"],
+            temperature=c.get("temperature", 0.7),
+            max_tokens=c.get("max_tokens", 4096),
+            context_window=c.get("context_window", 32768),
+            gpu_layers=c.get("gpu_layers", -1),
             image_base64=image_base64
         )
-        
-        if progress_callback: progress_callback("🎉 Vision processing complete!")
-        self._restore_default_state(progress_callback)
-        return result
+        return response
 
-    def execute_sequential_boardroom(self, user_input: str, progress_callback=None, compass_weight: str = None) -> str:
+    def execute_standard(self, user_input: str, progress_callback=None, compass_weight: str = None, source_file_path: str = None) -> str:
+        """
+        Standard single-model query with a preset context. No complex orchestration.
+        """
+        # Similar to simple, direct LLM call
+        print("[STANDARD] Executing standard request...")
+        c = get_role_config("standard")
+        response = llm.generate_response(
+            prompt=user_input,
+            system_prompt=self._inject_compass(c, weight_override=compass_weight),
+            model=c["model"],
+            temperature=c.get("temperature", 0.7),
+            max_tokens=c.get("max_tokens", 4096),
+            context_window=c.get("context_window", 32768),
+            gpu_layers=c.get("gpu_layers", -1)
+        )
+        return response
+
+    def execute_vision(self, user_input: str, image_base64: str, progress_callback=None, compass_weight: str = None, source_file_path: str = None) -> str:
+        """
+        Executes a vision-based request using a model that supports images.
+        """
+        print("[VISION] Executing vision request...")
+        c = get_role_config("vision")
+        response = llm.generate_response(
+            prompt=user_input,
+            system_prompt=self._inject_compass(c, weight_override=compass_weight),
+            model=c["model"],
+            temperature=c.get("temperature", 0.7),
+            max_tokens=c.get("max_tokens", 4096),
+            context_window=c.get("context_window", 32768),
+            gpu_layers=c.get("gpu_layers", -1),
+            image_base64=image_base64
+        )
+        return response
+
+    def execute_nft_creation(self, user_input: str, progress_callback=None, compass_weight: str = None, source_file_path: str = None) -> str:
+        """
+        Executes the NFT creation lifecycle.
+        """
+        print("[NFT_CREATION] Executing NFT creation request...")
+        nft_agent = NFTAgent()
+        return nft_agent.create_nft_metadata(user_input)
+
+    def execute_oracle_council(self, user_input: str, progress_callback=None, compass_weight: str = None, source_file_path: str = None) -> str:
+        """
+        Oracle Council Protocol: Rigorous highest-tier execution logic.
+        """
+        task_id = self.memory.generate_task_id(user_input)
+        role_sequence = ["board_strategist", "board_critic", "board_logical"]
+        return self._execute_orchestrated_meeting(
+            task_id=task_id,
+            user_input=user_input,
+            role_sequence=role_sequence,
+            synthesis_role="board_chairman",
+            progress_callback=progress_callback,
+            compass_weight="MAXIMUM",
+            source_file_path=source_file_path
+        )
+
+    def execute_sequential_boardroom(self, user_input: str, progress_callback=None, compass_weight: str = None, source_file_path: str = None) -> str:
         """
         Production Sequential Boardroom: Strategy -> Execution -> Critique -> Creation -> Logic -> Chairman
         """
@@ -839,10 +609,11 @@ Output your final blueprint in the specified JSON format for your role.""",
             role_sequence=role_sequence,
             synthesis_role="board_chairman",
             progress_callback=progress_callback,
-            compass_weight=compass_weight
+            compass_weight=compass_weight,
+            source_file_path=source_file_path
         )
 
-    def execute_technical_meeting(self, user_input: str, progress_callback=None, compass_weight: str = None) -> str:
+    def execute_technical_meeting(self, user_input: str, progress_callback=None, compass_weight: str = None, source_file_path: str = None) -> str:
         """
         Production Technical Meeting: Specialist -> Innovation -> Critique -> Overseer
         """
@@ -854,12 +625,13 @@ Output your final blueprint in the specified JSON format for your role.""",
             role_sequence=role_sequence,
             synthesis_role="technical_overseer",
             progress_callback=progress_callback,
-            compass_weight=compass_weight
+            compass_weight=compass_weight,
+            source_file_path=source_file_path
         )
 
-    def execute_design_meeting(self, user_input: str, image_base64: str = None, progress_callback=None, compass_weight: str = None) -> str:
+    def execute_design_meeting(self, user_input: str, image_base64: str = None, progress_callback=None, compass_weight: str = None, source_file_path: str = None) -> str:
         """
-        Production Design Meeting: Concept Generation -> Creative Expansion -> Aesthetic Critique -> Art Direction
+        Production Design Meeting: Junior Designer -> Creative Expansionist -> Critic -> Senior Designer
         """
         task_id = self.memory.generate_task_id(user_input)
         role_sequence = ["design_junior", "design_creative", "design_critic"]
@@ -870,52 +642,101 @@ Output your final blueprint in the specified JSON format for your role.""",
             synthesis_role="design_senior",
             progress_callback=progress_callback,
             compass_weight=compass_weight,
-            image_base64=image_base64
+            image_base64=image_base64,
+            source_file_path=source_file_path
         )
 
-    def execute_nft_creation(self, user_input: str, progress_callback=None, compass_weight: str = None) -> str:
+    def continue_development_lifecycle(self, proposal_id: str, next_phase: str, proposal_content: str) -> str:
         """
-        NFT Creation Workflow:
-        1. Agent generates metadata.
-        2. Agent simulates minting.
-        3. Orchestrator returns the report.
+        Continue the development lifecycle for a proposal moved on the Kanban board.
+
+        Called by kanban_processor when a card is dragged to a new column.
+        Each phase runs the appropriate council/meeting and writes the result
+        back into the proposal file via DevRouteManager.
+
+        Args:
+            proposal_id:      The DEV-… ID of the proposal (e.g. DEV-20260518-123456-ABCD)
+            next_phase:       The target lifecycle phase: 'beta', 'alpha', 'finalized', 'deployed'
+            proposal_content: Full markdown content of the proposal file at the time of the move
+
+        Returns:
+            str: Human-readable result message
         """
-        msg_start = "[NFT] Initiating NFT Creation Pipeline..."
-        print(f"--> {msg_start}")
-        if progress_callback: progress_callback(msg_start)
-        
-        agent = NFTAgent(self)
-        
-        # We use the nft_specialist configuration to guide the local LLM if needed, 
-        # but the agent has its own internal logic for now.
-        
-        # Extract theme from user_input (naive for now)
-        theme = user_input.replace("/nft", "").replace("#nft", "").strip()
-        if not theme:
-            theme = "Unknown Relic"
-            
-        result = agent.process_creation(theme, context=user_input, compass_weight=compass_weight)
-        
-        report = textwrap.dedent(f"""
-        # NFT CREATION REPORT
-        
-        **Theme**: {result['theme']}
-        **Token ID**: `{result['token_id']}`
-        **Minted At**: {result['minted_at']}
-        
-        ## Metadata
-        - **Name**: {result['name']}
-        - **Description**: {result['description']}
-        
-        ## Traits
-        {json.dumps(result['traits'], indent=2)}
-        
-        ## Visual Direction
-        > {result['image_prompt']}
-        
-        ---
-        *Generated by Cognitive OS NFT Agent Module*
-        """)
-        
-        if progress_callback: progress_callback("NFT Creation Complete!")
-        return report
+        from src.dev_route import DevRouteManager
+        dev_manager = DevRouteManager()
+
+        print(f"[LIFECYCLE] Starting phase '{next_phase}' for {proposal_id}")
+
+        # ------------------------------------------------------------------
+        # BETA: Technical council reviews the proposal, then a handoff
+        #       document is generated for the developer to work from in VS Code.
+        #       Card stays in Beta Testing (🔍 Review) until the human is done.
+        # ------------------------------------------------------------------
+        if next_phase == "beta":
+            user_input = (
+                f"Review the following development proposal thoroughly.\n\n"
+                f"Your output MUST contain four clearly-headed sections:\n"
+                f"1. **Summary** — what this system does and its purpose\n"
+                f"2. **Difficulties & Constraints** — technical challenges, limitations, risks\n"
+                f"3. **Implementation Tasks** — a numbered list of concrete coding tasks\n"
+                f"4. **Technical Recommendations** — architecture, libraries, patterns to use\n\n"
+                f"Proposal ID: {proposal_id}\n\n"
+                f"{proposal_content}"
+            )
+            report = self.execute_technical_meeting(
+                user_input=user_input,
+                source_file_path=None
+            )
+            # Generate handoff document in vault + source backup, and link proposal
+            handoff_result = dev_manager.generate_beta_handoff(proposal_id, report)
+            if "error" in handoff_result:
+                raise RuntimeError(f"Handoff generation failed: {handoff_result['error']}")
+            return (
+                f"✅ Beta Council review complete for {proposal_id}.\n"
+                f"Handoff saved to: {handoff_result['filename']}\n"
+                f"Open the handoff in VS Code and work through the task checklist.\n"
+                f"Move the card to Alpha Polish when all tasks are ticked off."
+            )
+
+        # ------------------------------------------------------------------
+        # ALPHA: Full boardroom produces the Alpha Polish execution plan.
+        # ------------------------------------------------------------------
+        elif next_phase == "alpha":
+            user_input = (
+                f"The following proposal has passed Beta Testing. "
+                f"Produce a comprehensive Alpha Polish plan covering UI/UX refinements, "
+                f"performance optimisations, and final pre-release hardening.\n\n"
+                f"Proposal ID: {proposal_id}\n\n"
+                f"{proposal_content}"
+            )
+            report = self.execute_sequential_boardroom(
+                user_input=user_input,
+                source_file_path=None
+            )
+            handoff_result = dev_manager.generate_alpha_handoff(proposal_id, report)
+            if "error" in handoff_result:
+                raise RuntimeError(f"Alpha handoff generation failed: {handoff_result['error']}")
+            return (
+                f"✅ Alpha Polish plan created for {proposal_id}.\n"
+                f"Handoff saved to: {handoff_result['filename']}\n"
+                f"Open the handoff in VS Code and work through the task checklist.\n"
+                f"Move the card to Finalized when all tasks are ticked off."
+            )
+
+        # ------------------------------------------------------------------
+        # FINALIZED / DEPLOYED: Mark the proposal as released.
+        # ------------------------------------------------------------------
+        elif next_phase in ("finalized", "deployed"):
+            dev_manager.finalize_release(
+                proposal_id,
+                {
+                    "version_number": "1.0.0",
+                    "release_notes": f"Released via Kanban board transition to '{next_phase}'.",
+                    "models_deployed": []
+                },
+                user_approved=True
+            )
+            return f"✅ Proposal {proposal_id} finalised and released."
+
+        else:
+            raise ValueError(f"Unknown lifecycle phase '{next_phase}' for proposal {proposal_id}")
