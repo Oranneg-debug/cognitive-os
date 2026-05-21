@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cognitive OS - Control Panel</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <aside class="sidebar">
+            <h1>Cognitive OS</h1>
+            <nav>
+                <h2>Roles</h2>
+                <ul id="roles-list">
+                    <!-- Roles will be dynamically inserted here -->
+                </ul>
+                <h2>Base Models</h2>
+                <ul id="models-list">
+                    <!-- Models will be dynamically inserted here -->
+                </ul>
+            </nav>
+            <div class="test-panel">
+                <select id="orchestration-select" class="orchestration-select" title="Select orchestration pattern">
+                    <option value="auto">Auto (Sentry routes)</option>
+                    <option value="/simple">⚡ Simple — single pass</option>
+                    <option value="/standard">📋 Standard — single + preset</option>
+                    <option value="/vision">👁 Vision — image-aware single pass</option>
+                    <option value="/technical">🔧 Technical Meeting</option>
+                    <option value="/design">🎨 Design Meeting</option>
+                    <option value="/boardroom">🏛 Sequential Boardroom</option>
+                    <option value="/oracle">🔮 Oracle Council</option>
+                    <option value="/nft">💎 NFT Creation</option>
+                    <option value="/dev">🧪 Dev Lifecycle (creates proposal)</option>
+                </select>
+                <input type="text" id="test-prompt-input" placeholder="Prompt for the selected orchestration…">
+                <button id="test-btn" class="test-btn">Run Orchestration</button>
+            </div>
+        </aside>
+        <main class="main-content">
+            <header>
+                <div class="tabs">
+                    <button class="tab-link active" data-tab="config">Configuration</button>
+                    <button class="tab-link" data-tab="orchestrations">Orchestrations</button>
+                    <button class="tab-link" data-tab="structure">System Structure</button>
+                    <button class="tab-link" data-tab="flow">Request Flow</button>
+                    <button class="tab-link" data-tab="kanban">Kanban Workflow</button>
+                </div>
+                <button id="save-btn" class="save-btn" disabled>Save Configuration</button>
+            </header>
+
+            <div id="config" class="tab-content active">
+                <div class="test-panel-container">
+                    <h1 id="config-title">Select a Role or Model to Configure</h1>
+                    <div class="test-panel-inline">
+                         <!-- Test panel removed from here as it lives in the sidebar -->
+                    </div>
+                </div>
+                <div id="config-panel" class="config-panel">
+                    <!-- Configuration form will be built here -->
+                    <p class="placeholder">Select an item from the sidebar to view and edit its configuration.</p>
+                </div>
+            </div>
+
+            <div id="orchestrations" class="tab-content">
+                <div class="orchestrations-page">
+                    <h1>🎼 Orchestrations</h1>
+                    <p class="orch-subtitle">
+                        Pick a pattern, type a prompt, watch the council run. Each card sends a prefixed
+                        request to <code>/process</code> — the Sentry Router still validates, but the
+                        prefix forces the pattern.
+                    </p>
+
+                    <div class="orch-prompt-row">
+                        <textarea id="orch-prompt" rows="4"
+                            placeholder="e.g. 'Design a memento-mori back piece that nods to bioluminescent jellyfish'"></textarea>
+                        <div class="orch-options">
+                            <label>Compass weight
+                                <select id="orch-compass">
+                                    <option value="">Default (per-role)</option>
+                                    <option value="MAXIMUM">MAXIMUM</option>
+                                    <option value="HIGH">HIGH</option>
+                                    <option value="MEDIUM">MEDIUM</option>
+                                    <option value="LOW">LOW</option>
+                                    <option value="IGNORE">IGNORE</option>
+                                </select>
+                            </label>
+                        </div>
+                    </div>
+
+                    <div id="orch-grid" class="orch-grid">
+                        <!-- Orchestration cards injected here -->
+                    </div>
+
+                    <div id="orch-output" class="orch-output">
+                        <h3>Output</h3>
+                        <div class="orch-meta"></div>
+                        <pre class="orch-response"><em>No run yet.</em></pre>
+                    </div>
+                </div>
+            </div>
+
+            <div id="structure" class="tab-content">
+                <!-- System Structure Diagram will be loaded here -->
+                <div class="placeholder">Loading System Structure...</div>
+            </div>
+            <div id="flow" class="tab-content">
+                <!-- Request Flow Diagram will be loaded here -->
+                <div class="placeholder">Loading Request Flow...</div>
+            </div>
+            <div id="kanban" class="tab-content">
+                <!-- Kanban Workflow Diagram will be loaded here -->
+                <div class="placeholder">Loading Kanban Workflow...</div>
+            </div>
+        </main>
+    </div>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <script>mermaid.initialize({ startOnLoad: false });</script>
+    <script src="script.js"></script>
+</body>
+</html>

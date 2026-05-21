@@ -1,0 +1,549 @@
+document.addEventListener('DOMContentLoaded', () => {
+    const rolesList = document.getElementById('roles-list');
+    const modelsList = document.getElementById('models-list');
+    const configTitle = document.getElementById('config-title');
+    const configPanel = document.getElementById('config-panel');
+    const saveBtn = document.getElementById('save-btn');
+    const testPromptInput = document.getElementById('test-prompt-input');
+    const testBtn = document.getElementById('test-btn');
+    const orchestrationSelect = document.getElementById('orchestration-select');
+    const tabs = document.querySelectorAll('.tab-link');
+
+    // ---- Orchestrations catalog (single source of truth for sidebar + cards) ----
+    const ORCHESTRATIONS = [
+        { cmd: '/simple',    emoji: '⚡', name: 'Simple',
+          desc: 'Single-model pass via the reflex layer. Fast, no council.',
+          target: 'simple role' },
+        { cmd: '/standard',  emoji: '📋', name: 'Standard',
+          desc: 'Single model with active preset. The operational brain.',
+          target: 'standard role' },
+        { cmd: '/vision',    emoji: '👁', name: 'Vision',
+          desc: 'Image-aware single pass (image_base64 supported via API).',
+          target: 'vision role' },
+        { cmd: '/technical', emoji: '🔧', name: 'Technical Meeting',
+          desc: 'Specialist → Creative → Critic → Overseer synthesis.',
+          target: 'technical_* roles' },
+        { cmd: '/design',    emoji: '🎨', name: 'Design Meeting',
+          desc: 'Junior → Creative → Critic → Senior with image prompts.',
+          target: 'design_* roles' },
+        { cmd: '/boardroom', emoji: '🏛', name: 'Sequential Boardroom',
+          desc: 'Full 5-seat council (Strategist · Specialist · Critic · Creative · Logical) + Chairman synthesis.',
+          target: 'board_* roles' },
+        { cmd: '/oracle',    emoji: '🔮', name: 'Oracle Council',
+          desc: 'Online frontier-model parallel deliberation (when connected).',
+          target: 'oracle pattern' },
+        { cmd: '/nft',       emoji: '💎', name: 'NFT Creation',
+          desc: 'Metadata generation + minting simulation.',
+          target: 'nft_specialist' },
+        { cmd: '/dev',       emoji: '🧪', name: 'Dev Lifecycle',
+          desc: 'Creates a proposal and pushes a card to Backlog. The Kanban watcher takes it from there.',
+          target: 'DevRouteManager' },
+    ];
+
+    let fullConfig = {};
+    let availableModels = []; // New array to store the live model list
+    let currentSelection = { type: null, key: null };
+    let hasChanges = false;
+
+    // --- Data Fetching and Initialization ---
+
+    async function loadConfig() {
+        try {
+            // Fetch config and live models concurrently for speed
+            const [configResponse, modelsResponse] = await Promise.all([
+                fetch('/api/config'),
+                fetch('/api/models')
+            ]);
+
+            if (!configResponse.ok) {
+                throw new Error('Failed to load configuration');
+            }
+            
+            fullConfig = await configResponse.json();
+            
+            if (modelsResponse.ok) {
+                const modelsData = await modelsResponse.json();
+                availableModels = modelsData.models || [];
+            } else {
+                console.warn("Could not load live models from LM Studio.");
+            }
+
+            populateSidebar();
+        } catch (error) {
+            console.error('Error loading config:', error);
+            configPanel.innerHTML = `<p class="placeholder">Error: Could not load configuration from the backend.</p>`;
+        }
+    }
+
+    function populateSidebar() {
+        rolesList.innerHTML = '';
+        modelsList.innerHTML = '';
+
+        const allRoles = Object.keys(fullConfig.roles || {}).sort();
+        
+        const roleGroups = {
+            "Dev Lifecycle": allRoles.filter(k => k.startsWith('dev_')),
+            "Boardroom": allRoles.filter(k => k.startsWith('board_')),
+            "Technical Meeting": allRoles.filter(k => k.startsWith('technical_')),
+            "Design Meeting": allRoles.filter(k => k.startsWith('design_')),
+            "System & Base": allRoles.filter(k => k === 'simple' || k === 'standard' || k === 'vision' || k === 'nft_specialist'),
+            "Core Flow Control": allRoles.filter(k => k === 'moderator' || k === 'brand_guard' || k === 'scribe'),
+        };
+
+        // Clear and build the roles list with groups
+        rolesList.innerHTML = '';
+        for (const groupName in roleGroups) {
+            const roles = roleGroups[groupName];
+            if (roles.length > 0) {
+                const h2 = document.createElement('h2');
+                h2.textContent = groupName;
+                rolesList.appendChild(h2);
+
+                const ul = document.createElement('ul');
+                roles.forEach(key => {
+                    const li = document.createElement('li');
+                    li.textContent = key;
+                    li.dataset.type = 'role';
+                    li.dataset.key = key;
+                    ul.appendChild(li);
+                });
+                rolesList.appendChild(ul);
+            }
+        }
+
+        Object.keys(fullConfig.models || {}).sort().forEach(key => {
+            const li = document.createElement('li');
+            li.textContent = key;
+            li.dataset.type = 'model';
+            li.dataset.key = key;
+            modelsList.appendChild(li);
+        });
+    }
+
+    // --- UI Rendering ---
+
+    function renderConfigForm(type, key) {
+        currentSelection = { type, key };
+        const data = (type === 'role') ? fullConfig.roles[key] : fullConfig.models[key];
+
+        configTitle.textContent = `Configuring ${type}: ${key}`;
+        configPanel.innerHTML = '';
+
+        if (type === 'role') {
+            const isEnabled = data.enabled !== false; // default to true if missing
+            configPanel.appendChild(createCheckbox('enabled', isEnabled, 'Enable this role'));
+            
+            // Use the live availableModels if we have them, otherwise fall back to whatever is in the config
+            let modelOptions = availableModels.length > 0 ? availableModels : Object.keys(fullConfig.models || {});
+            
+            // Ensure the currently selected model is always in the list, even if LM Studio doesn't report it
+            // (e.g., if LM Studio is closed but the config has a saved model)
+            if (data.model && !modelOptions.includes(data.model)) {
+                modelOptions = [data.model, ...modelOptions];
+            }
+            
+            configPanel.appendChild(createSelect('model', data.model, 'Model', modelOptions));
+            configPanel.appendChild(createTextArea('system_prompt', data.system_prompt, 'System Prompt'));
+        }
+
+        configPanel.appendChild(createSlider('temperature', data.temperature, 'Temperature', 0, 2, 0.1));
+        configPanel.appendChild(createSlider('top_p', data.top_p, 'Top P', 0, 1, 0.05));
+        configPanel.appendChild(createSlider('top_k', data.top_k, 'Top K', 0, 120, 1));
+        configPanel.appendChild(createSlider('repeat_penalty', data.repeat_penalty, 'Repeat Penalty', 0, 2, 0.1));
+        configPanel.appendChild(createSlider('min_p', data.min_p, 'Min P', 0, 1, 0.05));
+        configPanel.appendChild(createNumberInput('max_tokens', data.max_tokens, 'Max Tokens'));
+        configPanel.appendChild(createNumberInput('context_window', data.context_window, 'Context Window'));
+        configPanel.appendChild(createNumberInput('gpu_layers', data.gpu_layers, 'GPU Layers (-1 for max)'));
+
+        if (type === 'role') {
+            const compassOptions = ["IGNORE", "LOW WEIGHT", "MEDIUM WEIGHT", "HIGH WEIGHT", "MAXIMUM WEIGHT"];
+            configPanel.appendChild(createSelect('compass_weight', data.compass_weight, 'Compass Weight', compassOptions));
+        }
+    }
+
+    // --- Form Element Creators ---
+
+    function createFormGroup(labelText) {
+        const group = document.createElement('div');
+        group.className = 'form-group';
+        const label = document.createElement('label');
+        label.textContent = labelText;
+        group.appendChild(label);
+        return group;
+    }
+
+    function createSelect(key, value, labelText, options) {
+        const group = createFormGroup(labelText);
+        const select = document.createElement('select');
+        select.id = `config-${key}`;
+        select.dataset.key = key;
+        options.forEach(option => {
+            const opt = document.createElement('option');
+            opt.value = option;
+            opt.textContent = option;
+            if (option === value) {
+                opt.selected = true;
+            }
+            select.appendChild(opt);
+        });
+        select.addEventListener('change', handleInputChange);
+        group.appendChild(select);
+        return group;
+    }
+
+    function createCheckbox(key, value, labelText) {
+        const group = document.createElement('div');
+        group.className = 'form-group checkbox-group';
+        const label = document.createElement('label');
+        
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.id = `config-${key}`;
+        checkbox.dataset.key = key;
+        checkbox.checked = value;
+        checkbox.addEventListener('change', handleInputChange);
+        
+        const span = document.createElement('span');
+        span.textContent = labelText;
+
+        label.appendChild(checkbox);
+        label.appendChild(span);
+        group.appendChild(label);
+        return group;
+    }
+
+    function createTextArea(key, value, labelText) {
+        const group = createFormGroup(labelText);
+        const textarea = document.createElement('textarea');
+        textarea.id = `config-${key}`;
+        textarea.dataset.key = key;
+        textarea.value = value || '';
+        textarea.addEventListener('input', handleInputChange);
+        group.appendChild(textarea);
+        return group;
+    }
+    
+    // This function is no longer needed for roles, but might be useful elsewhere.
+    function createText(key, value, labelText) {
+        const group = createFormGroup(labelText);
+        const text = document.createElement('input');
+        text.type = 'text';
+        text.id = `config-${key}`;
+        text.dataset.key = key;
+        text.value = value || '';
+        text.addEventListener('input', handleInputChange);
+        group.appendChild(text);
+        return group;
+    }
+
+
+    function createSlider(key, value, labelText, min, max, step) {
+        const group = createFormGroup(labelText);
+        const sliderContainer = document.createElement('div');
+        sliderContainer.className = 'slider-group';
+        
+        const slider = document.createElement('input');
+        slider.type = 'range';
+        slider.id = `config-${key}`;
+        slider.dataset.key = key;
+        slider.min = min;
+        slider.max = max;
+        slider.step = step;
+        slider.value = value || 0;
+        
+        const valueDisplay = document.createElement('span');
+        valueDisplay.textContent = slider.value;
+        
+        slider.addEventListener('input', () => {
+            valueDisplay.textContent = slider.value;
+            handleInputChange({ target: slider });
+        });
+        
+        sliderContainer.appendChild(slider);
+        sliderContainer.appendChild(valueDisplay);
+        group.appendChild(sliderContainer);
+        return group;
+    }
+
+    function createNumberInput(key, value, labelText) {
+        const group = createFormGroup(labelText);
+        const input = document.createElement('input');
+        input.type = 'number';
+        input.id = `config-${key}`;
+        input.dataset.key = key;
+        input.value = value || 0;
+        input.addEventListener('input', handleInputChange);
+        group.appendChild(input);
+        return group;
+    }
+
+    // --- Tab Switching Logic ---
+
+    async function handleTabClick(event) {
+        const tab = event.target;
+        const tabName = tab.dataset.tab;
+
+        // Update tab buttons
+        tabs.forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+
+        // Update content panels
+        document.querySelectorAll('.tab-content').forEach(panel => {
+            panel.classList.remove('active');
+        });
+        document.getElementById(tabName).classList.add('active');
+
+        // Hide save button if not on config tab
+        saveBtn.style.display = (tabName === 'config') ? 'block' : 'none';
+
+        // Orchestrations tab: render cards (no diagram fetch)
+        if (tabName === 'orchestrations') {
+            renderOrchestrationCards();
+            return;
+        }
+
+        // Load content for diagram tabs if they haven't been loaded yet
+        if (tabName !== 'config' && !document.getElementById(tabName).hasAttribute('data-loaded')) {
+            loadDiagram(tabName);
+        }
+    }
+    
+    async function loadDiagram(tabName) {
+        const panel = document.getElementById(tabName);
+        panel.innerHTML = '<p class="placeholder">Loading System Diagram...</p>';
+
+        try {
+            const response = await fetch(`/api/system/${tabName}`);
+            if (!response.ok) {
+                throw new Error(`Failed to load '${tabName}' diagram`);
+            }
+            const data = await response.json();
+
+            panel.innerHTML = `<pre class="mermaid">${data.diagram}</pre>`;
+            await mermaid.run({ nodes: panel.querySelectorAll('.mermaid') });
+            panel.setAttribute('data-loaded', 'true');
+
+        } catch (error) {
+            console.error(`Error loading diagram for ${tabName}:`, error);
+            panel.innerHTML = `<p class="placeholder">Error: Could not load diagram.</p>`;
+        }
+    }
+
+
+    // --- Event Handlers ---
+
+    function handleSidebarClick(event) {
+        if (event.target.tagName === 'LI') {
+            // Remove active class from all items
+            document.querySelectorAll('.sidebar li').forEach(li => li.classList.remove('active'));
+            // Add active class to clicked item
+            event.target.classList.add('active');
+            
+            const { type, key } = event.target.dataset;
+            renderConfigForm(type, key);
+        }
+    }
+
+    function handleInputChange(event) {
+        hasChanges = true;
+        saveBtn.disabled = false;
+        saveBtn.textContent = 'Save Configuration';
+        saveBtn.classList.remove('success');
+
+        const { key } = event.target.dataset;
+        let value = event.target.value;
+
+        // Convert numeric types
+        if (event.target.type === 'number' || event.target.type === 'range') {
+            value = Number(value);
+        } else if (event.target.type === 'checkbox') {
+            value = event.target.checked;
+        }
+        
+        const { type, key: configKey } = currentSelection;
+        if (type && configKey) {
+            if (type === 'role') {
+                fullConfig.roles[configKey][key] = value;
+            } else {
+                fullConfig.models[configKey][key] = value;
+            }
+        }
+    }
+
+    async function handleSaveClick() {
+        if (!hasChanges) return;
+
+        try {
+            const response = await fetch('/api/config', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(fullConfig),
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.detail || 'Failed to save configuration');
+            }
+
+            hasChanges = false;
+            saveBtn.disabled = true;
+            saveBtn.textContent = 'Saved Successfully!';
+            saveBtn.classList.add('success');
+            
+            // Optionally, reload config to ensure sync, though not strictly necessary
+            // await loadConfig();
+
+        } catch (error) {
+            console.error('Error saving config:', error);
+            alert(`Error: ${error.message}`);
+        }
+    }
+
+    /**
+     * Run an orchestration against /process. `cmd` is "/simple", "/boardroom", …
+     * or "auto" to let the Sentry Router decide.
+     */
+    async function runOrchestration(cmd, prompt, { compass = '' } = {}) {
+        if (!prompt || !prompt.trim()) {
+            throw new Error('Prompt is empty.');
+        }
+        const composed = (cmd && cmd !== 'auto')
+            ? `${cmd} ${prompt}`
+            : prompt;
+
+        const body = { prompt: composed };
+        if (compass) body.compass_weight = compass;
+
+        const response = await fetch('/process', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+        });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            throw new Error(result.detail || result.response || `HTTP ${response.status}`);
+        }
+        return result;
+    }
+
+    async function handleTestClick() {
+        const prompt = testPromptInput.value;
+        if (!prompt) {
+            alert('Please enter a test prompt.');
+            return;
+        }
+        const cmd = orchestrationSelect ? orchestrationSelect.value : '/simple';
+        testBtn.disabled = true;
+        testBtn.textContent = 'Running…';
+        try {
+            const result = await runOrchestration(cmd, prompt);
+            alert(
+                `Pattern: ${result.pattern || cmd}\n` +
+                `Task: ${result.task_id || '—'}\n\n` +
+                `${(result.response || '').slice(0, 1200)}` +
+                ((result.response || '').length > 1200 ? '\n\n…(truncated, see terminal)' : '')
+            );
+        } catch (error) {
+            console.error('Error running orchestration:', error);
+            alert(`Error: ${error.message}`);
+        } finally {
+            testBtn.disabled = false;
+            testBtn.textContent = 'Run Orchestration';
+        }
+    }
+
+    // ---- Orchestrations tab ----
+    function renderOrchestrationCards() {
+        const grid = document.getElementById('orch-grid');
+        if (!grid || grid.dataset.rendered === '1') return;
+
+        grid.innerHTML = '';
+        ORCHESTRATIONS.forEach(o => {
+            const card = document.createElement('div');
+            card.className = 'orch-card';
+            card.dataset.cmd = o.cmd;
+            card.innerHTML = `
+                <div class="orch-card-head">
+                    <span class="orch-card-emoji">${o.emoji}</span>
+                    <span>${o.name}</span>
+                </div>
+                <span class="orch-card-cmd">${o.cmd}</span>
+                <div class="orch-card-desc">${o.desc}</div>
+                <div class="orch-card-meta">→ ${o.target}</div>
+            `;
+            card.addEventListener('click', () => triggerCardOrchestration(card, o.cmd));
+            grid.appendChild(card);
+        });
+        grid.dataset.rendered = '1';
+    }
+
+    async function triggerCardOrchestration(card, cmd) {
+        const promptEl = document.getElementById('orch-prompt');
+        const compassEl = document.getElementById('orch-compass');
+        const outMeta = document.querySelector('.orch-meta');
+        const outResp = document.querySelector('.orch-response');
+
+        const prompt = (promptEl && promptEl.value || '').trim();
+        if (!prompt) {
+            promptEl && promptEl.focus();
+            outMeta.innerHTML = `<span class="err">Need a prompt first.</span>`;
+            return;
+        }
+
+        card.classList.add('running');
+        outMeta.innerHTML = `<span>Pattern: ${cmd}</span><span>Status: ⏳ running…</span>`;
+        outResp.textContent = 'Awaiting response from /process …';
+
+        const t0 = performance.now();
+        try {
+            const result = await runOrchestration(cmd, prompt, {
+                compass: compassEl ? compassEl.value : ''
+            });
+            const ms = Math.round(performance.now() - t0);
+            outMeta.innerHTML =
+                `<span class="ok">Pattern: ${result.pattern || cmd}</span>` +
+                `<span>Task: ${result.task_id || '—'}</span>` +
+                `<span>Duration: ${(ms / 1000).toFixed(1)}s</span>` +
+                (result.saved_path ? `<span>Saved: ${result.saved_path.split(/[\\/]/).slice(-1)[0]}</span>` : '');
+            outResp.textContent = result.response || '(no response body)';
+        } catch (error) {
+            outMeta.innerHTML = `<span class="err">Pattern: ${cmd}</span><span class="err">Error</span>`;
+            outResp.textContent = String(error.message || error);
+        } finally {
+            card.classList.remove('running');
+        }
+    }
+
+    // --- Initial Setup ---
+
+    function initializeCollapsibleMenus() {
+        const sidebarHeaders = document.querySelectorAll('.sidebar h2');
+        sidebarHeaders.forEach(header => {
+            const list = header.nextElementSibling;
+            if (list) {
+                // Start with menus collapsed
+                list.style.display = 'none';
+                header.classList.add('collapsed');
+            }
+
+            header.addEventListener('click', () => {
+                if (list) {
+                    const isCollapsed = list.style.display === 'none';
+                    list.style.display = isCollapsed ? 'block' : 'none';
+                    header.classList.toggle('collapsed', !isCollapsed);
+                }
+            });
+        });
+    }
+
+    rolesList.addEventListener('click', handleSidebarClick);
+    modelsList.addEventListener('click', handleSidebarClick);
+    saveBtn.addEventListener('click', handleSaveClick);
+    testBtn.addEventListener('click', handleTestClick);
+    tabs.forEach(tab => tab.addEventListener('click', handleTabClick));
+
+    loadConfig().then(() => {
+        // Initialize menus after the sidebar has been populated
+        initializeCollapsibleMenus();
+    });
+});
