@@ -212,10 +212,23 @@ class LoadConfigIn(BaseModel):
     gpu: Optional[str] = None  # e.g. "max", "auto"
 
 
+class SamplingIn(BaseModel):
+    """Per-model sampling defaults. NOT load-time — these are applied at
+    inference (chat.completions) and persisted to LM Studio's per-model
+    GUI prefs so subsequent JIT-loads pick them up automatically."""
+    temperature: Optional[float] = None
+    top_p: Optional[float] = None
+    top_k: Optional[int] = None
+    min_p: Optional[float] = None
+    repeat_penalty: Optional[float] = None
+    max_tokens: Optional[int] = None
+
+
 class LoadRequest(BaseModel):
     model_key: str
     identifier: Optional[str] = None
     config: Optional[LoadConfigIn] = None
+    sampling: Optional[SamplingIn] = None
     ttl: Optional[int] = None
     force_reload: Optional[bool] = False
 
@@ -247,11 +260,75 @@ async def list_loaded_and_downloaded():
     return await asyncio.to_thread(_snapshot)
 
 
+def _write_sampling_prefs(model_path: str, sampling: dict) -> Optional[str]:
+    """Write sampling defaults into LM Studio's per-model GUI prefs file.
+
+    LM Studio stores per-model overrides at
+        ~/.lmstudio/.internal/user-concrete-model-default-config/<path>.json
+    using dotted keys like 'llm.prediction.temperature'. Writing here means
+    every subsequent JIT-load (including ones triggered by chat.completions
+    without an explicit POST /api/load) picks up these defaults.
+
+    Returns the path written, or None if model_path is empty / write failed.
+    """
+    if not model_path:
+        return None
+    user_profile = os.environ.get("USERPROFILE", "")
+    if not user_profile:
+        return None
+    cfg_root = os.path.join(
+        user_profile, ".lmstudio", ".internal",
+        "user-concrete-model-default-config",
+    )
+    cfg_file = os.path.join(cfg_root, model_path.replace("/", os.sep) + ".json")
+    os.makedirs(os.path.dirname(cfg_file), exist_ok=True)
+
+    # Map our snake_case sampling keys to LM Studio's dotted prefs keys.
+    KEY_MAP = {
+        "temperature":    "llm.prediction.temperature",
+        "top_p":          "llm.prediction.topPSampling",
+        "top_k":          "llm.prediction.topKSampling",
+        "min_p":          "llm.prediction.minPSampling",
+        "repeat_penalty": "llm.prediction.repeatPenalty",
+        "max_tokens":     "llm.prediction.maxPredictedTokens",
+    }
+
+    # Merge with existing file (preserve any load-config fields already there).
+    existing: dict = {"fields": []}
+    if os.path.exists(cfg_file):
+        try:
+            with open(cfg_file, "r", encoding="utf-8") as f:
+                existing = json.load(f) or {"fields": []}
+        except Exception:
+            existing = {"fields": []}
+    fields = existing.get("fields") or []
+    indexed = {f.get("key"): i for i, f in enumerate(fields) if isinstance(f, dict)}
+
+    for skey, dotted in KEY_MAP.items():
+        if skey not in sampling:
+            continue
+        entry = {"key": dotted, "value": sampling[skey]}
+        if dotted in indexed:
+            fields[indexed[dotted]] = entry
+        else:
+            fields.append(entry)
+            indexed[dotted] = len(fields) - 1
+
+    existing["fields"] = fields
+    try:
+        with open(cfg_file, "w", encoding="utf-8") as f:
+            json.dump(existing, f, indent=2)
+        return cfg_file
+    except Exception:
+        return None
+
+
 @app.post("/api/load")
 async def load_model(req: LoadRequest):
     """Load (or reload) a model under the loader. Honours full config schema."""
     loader = _shared_loader()
     cfg = (req.config.model_dump(exclude_none=True) if req.config else {})
+    sampling = (req.sampling.model_dump(exclude_none=True) if req.sampling else {})
 
     def _do_load():
         # Auto-refresh catalog if the model_key was newly downloaded.
@@ -274,6 +351,20 @@ async def load_model(req: LoadRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"load failed: {e!r}")
 
+    # Persist sampling defaults to per-model GUI prefs (best-effort).
+    sampling_written_to = None
+    if sampling:
+        # Resolve the gguf path from the catalog so we write to the right file.
+        try:
+            for d in loader.list_downloaded():
+                if d.model_key == result.model_key:
+                    sampling_written_to = await asyncio.to_thread(
+                        _write_sampling_prefs, d.path, sampling
+                    )
+                    break
+        except Exception:
+            pass
+
     return {
         "status": "ok",
         "action": result.action,
@@ -281,6 +372,8 @@ async def load_model(req: LoadRequest):
         "model_key": result.model_key,
         "duration_s": result.duration_seconds,
         "config_applied": result.config_applied,
+        "sampling_applied": sampling,
+        "sampling_written_to": sampling_written_to,
     }
 
 

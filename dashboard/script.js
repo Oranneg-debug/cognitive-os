@@ -670,6 +670,22 @@ document.addEventListener('DOMContentLoaded', () => {
             if (fa === 'true') cfg.flash_attention = true;
             else if (fa === 'false') cfg.flash_attention = false;
 
+            // Sampling defaults: collected into a separate payload key so the
+            // backend can persist them per-model (they do NOT affect VRAM,
+            // they're applied at chat.completions request time).
+            const sampling = {};
+            const SAMPLING_KEYS = [
+                'temperature', 'top_p', 'top_k', 'min_p',
+                'repeat_penalty', 'max_tokens',
+            ];
+            for (const k of SAMPLING_KEYS) {
+                const v = fd.get(k);
+                if (v !== null && v !== '') {
+                    const n = Number(v);
+                    if (Number.isFinite(n)) sampling[k] = n;
+                }
+            }
+
             const body = {
                 model_key: (fd.get('model_key') || '').trim(),
                 force_reload: fd.get('force_reload') === 'on',
@@ -679,6 +695,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const ttl = fd.get('ttl');
             if (ttl !== null && ttl !== '') body.ttl = Number(ttl);
             if (Object.keys(cfg).length > 0) body.config = cfg;
+            if (Object.keys(sampling).length > 0) body.sampling = sampling;
             return body;
         }
 

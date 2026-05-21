@@ -518,10 +518,11 @@ header {
     color: var(--lms-ink);
     /* Adaptive padding: tight on phones, generous on widescreen, capped so the
        content doesn't drift to the far edges of an ultrawide. */
-    padding: clamp(1rem, 3vw, 4rem);
-    /* Centre the working area on ultrawide monitors so cards don't stretch
-       to absurd widths. 1800px keeps two 70B model_keys side-by-side comfortably. */
-    max-width: 1800px;
+    padding: clamp(0.75rem, 1.5vw, 2rem);
+    /* Centre the working area, but allow up to 3600px so a 3840-wide
+       monitor uses its real estate. The page itself max-widths; the body's
+       sidebar takes the rest. */
+    max-width: 3600px;
     margin-inline: auto;
     background:
         repeating-linear-gradient(
@@ -637,6 +638,39 @@ header {
     .lms-loadform { grid-column: 1;      grid-row: 2; min-width: 0; }
     .lms-result   { grid-column: 2;      grid-row: 2; min-width: 0; }
     .lms-logs     { grid-column: 3;      grid-row: 2; min-width: 0; }
+}
+
+/* Ultrawide (≥ ~2800px, e.g. 3840×1050 minus a 280px sidebar = 3560).
+   Short-and-wide layout: everything on a SINGLE row so vertical scrolling
+   stays minimal on a 1050-tall display. */
+@media (min-width: 2800px) {
+    .lms-grid {
+        grid-template-columns:
+            minmax(0, 4fr) minmax(0, 3fr) minmax(0, 3fr) minmax(0, 5fr);
+        grid-template-rows: 1fr;
+    }
+    .lms-loaded   { grid-column: 1; grid-row: 1; }
+    .lms-loadform { grid-column: 2; grid-row: 1; min-width: 0; }
+    .lms-result   { grid-column: 3; grid-row: 1; min-width: 0; }
+    .lms-logs     { grid-column: 4; grid-row: 1; min-width: 0; }
+
+    /* Cards become uniform-height since they share one row */
+    .lms-card,
+    .lms-card > .lms-table-wrap,
+    .lms-card > .lms-result-panel,
+    .lms-card > .lms-log-panel,
+    .lms-card > form {
+        height: 100%;
+    }
+
+    /* Limit the page to "useful working area" — beyond ~3600 we'd just
+       stretch type. Keep dashboard centred via margin-inline:auto. */
+    .lms-page { max-width: 3600px; }
+
+    /* Bench grid: history table wider, detail less narrow */
+    .lms-bench-grid {
+        grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+    }
 }
 
 .lms-bench-grid {
@@ -775,6 +809,19 @@ header {
     }
 }
 
+/* Ultrawide: form card is in a wider slot — give it 3 columns for density */
+@media (min-width: 2800px) {
+    .lms-loadform .lms-form {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 0.5rem;
+    }
+    /* Form takes the full card height with internal scroll */
+    .lms-loadform .lms-form {
+        max-height: calc(100vh - 200px);
+        overflow-y: auto;
+    }
+}
+
 .lms-field {
     display: flex;
     flex-direction: column;
@@ -830,6 +877,41 @@ header {
     align-items: center;
     border-top: 1px solid var(--lms-line);
     padding-top: 0.75rem;
+}
+
+/* ---- Sampling defaults fieldset ---- */
+.lms-fieldset {
+    grid-column: 1 / -1;
+    border: 1px solid var(--lms-line);
+    border-radius: 0;
+    margin: 0.5rem 0 0 0;
+    padding: 0.5rem 0.75rem 0.75rem 0.75rem;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    gap: 0.5rem 0.75rem;
+    background: rgba(255, 255, 255, 0.01);
+}
+
+.lms-fieldset legend {
+    color: var(--lms-gold-dim);
+    font-size: 0.72rem;
+    letter-spacing: 0.08em;
+    padding: 0 0.4rem;
+}
+
+.lms-fieldset .lms-hint {
+    color: var(--lms-ink-dim);
+    font-size: 0.68rem;
+    margin-left: 0.4rem;
+    letter-spacing: 0;
+    text-transform: lowercase;
+}
+
+/* On ultrawide, sampling fields lay out in a single row (6 cols) */
+@media (min-width: 2800px) {
+    .lms-fieldset {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
 }
 
 .lms-result-panel {

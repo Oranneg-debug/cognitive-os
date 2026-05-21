@@ -213,6 +213,42 @@
                                         <span>force_reload (evict existing)</span>
                                     </label>
 
+                                    <!-- Sampling defaults: NOT load-time, but persisted as
+                                         per-model defaults so inference uses them by default. -->
+                                    <fieldset class="lms-fieldset">
+                                        <legend>sampling defaults <span class="lms-hint">— inference, not VRAM</span></legend>
+                                        <label class="lms-field">
+                                            <span>temperature</span>
+                                            <input name="temperature" type="number"
+                                                step="0.01" min="0" max="2" placeholder="0.7">
+                                        </label>
+                                        <label class="lms-field">
+                                            <span>top_p</span>
+                                            <input name="top_p" type="number"
+                                                step="0.01" min="0" max="1" placeholder="0.95">
+                                        </label>
+                                        <label class="lms-field">
+                                            <span>top_k</span>
+                                            <input name="top_k" type="number"
+                                                min="0" max="200" placeholder="40">
+                                        </label>
+                                        <label class="lms-field">
+                                            <span>min_p</span>
+                                            <input name="min_p" type="number"
+                                                step="0.01" min="0" max="1" placeholder="0.05">
+                                        </label>
+                                        <label class="lms-field">
+                                            <span>repeat_penalty</span>
+                                            <input name="repeat_penalty" type="number"
+                                                step="0.01" min="0" max="2" placeholder="1.1">
+                                        </label>
+                                        <label class="lms-field">
+                                            <span>max_tokens</span>
+                                            <input name="max_tokens" type="number"
+                                                min="1" max="65536" placeholder="8192">
+                                        </label>
+                                    </fieldset>
+
                                     <div class="lms-form-actions">
                                         <button type="submit" class="lms-primary-btn"
                                             id="lms-load-submit">load</button>
