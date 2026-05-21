@@ -175,10 +175,12 @@
                                         </select>
                                     </label>
 
-                                    <label class="lms-field">
+                                    <label class="lms-field"
+                                        title="Accepts: 'max' (all GPU), 'off' (CPU-only), or a number 0.0–1.0 (fraction on GPU). Not the llama.cpp -1 convention.">
                                         <span>gpu_offload_ratio</span>
-                                        <input name="gpu_offload_ratio" type="number"
-                                            min="0" max="1" step="0.05" placeholder="1.0">
+                                        <input name="gpu_offload_ratio" type="text"
+                                            pattern="^(max|off|0(\.\d+)?|1(\.0+)?)$"
+                                            placeholder="max | off | 0.0–1.0">
                                     </label>
 
                                     <label class="lms-field">

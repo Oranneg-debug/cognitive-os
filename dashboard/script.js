@@ -651,7 +651,15 @@ document.addEventListener('DOMContentLoaded', () => {
             };
             setIfPresent('context_length', Number);
             setIfPresent('n_parallel', Number);
-            setIfPresent('gpu_offload_ratio', Number);
+            // gpu_offload_ratio accepts 'max' | 'off' | float 0.0–1.0.
+            // Pass strings through as-is so the backend sees the canonical
+            // shape; numeric strings convert to float.
+            setIfPresent('gpu_offload_ratio', v => {
+                const s = String(v).trim().toLowerCase();
+                if (s === 'max' || s === 'off') return s;
+                const n = Number(s);
+                return Number.isFinite(n) ? n : s;
+            });
             setIfPresent('cache_type_k');
             setIfPresent('cache_type_v');
             const fa = fd.get('flash_attention');

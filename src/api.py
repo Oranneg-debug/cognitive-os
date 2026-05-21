@@ -4,7 +4,7 @@ import uvicorn
 import os
 import re
 import yaml
-from typing import Optional
+from typing import Optional, Union
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -206,7 +206,9 @@ class LoadConfigIn(BaseModel):
     flash_attention: Optional[bool] = None
     cache_type_k: Optional[str] = None
     cache_type_v: Optional[str] = None
-    gpu_offload_ratio: Optional[float] = None
+    # Either a float in [0.0, 1.0] OR the literal strings 'max' / 'off'.
+    # Matches the GpuRatio contract in lmstudio_schema.py.
+    gpu_offload_ratio: Optional[Union[float, str]] = None
     gpu: Optional[str] = None  # e.g. "max", "auto"
 
 
