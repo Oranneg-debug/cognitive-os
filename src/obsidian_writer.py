@@ -4,13 +4,15 @@ from datetime import datetime
 class ObsidianWriter:
     def __init__(self, vault_path: str = "E:/Oranneg/CloudStation/Documents/Obsidian/Grand Nexus/AI-Help/cognitive-os"):
         self.vault_path = vault_path
-        self.memory_path = os.path.join(vault_path, "memory_logs")
+        # Hardcoded memory path per constraints
+        self.memory_path = "E:/Oranneg/CloudStation/Documents/Obsidian/Grand Nexus/AI-Help/cognitive-os/memory_logs"
         os.makedirs(self.vault_path, exist_ok=True)
         os.makedirs(self.memory_path, exist_ok=True)
         
-    def write_note(self, title: str, content: str, pattern_used: str, task_id: str) -> str:
+    def write_note(self, title: str, content: str, pattern_used: str, task_id: str, source_file_path: str = None) -> str:
         """
         Writes a generated response to the Obsidian vault with appropriate frontmatter.
+        If source_file_path is provided, it adds a backlink to the original document.
         """
         # Sanitize title for filename
         safe_title = "".join([c for c in title if c.isalpha() or c.isdigit() or c==' ']).rstrip()
@@ -41,8 +43,33 @@ task_id: {task_id}
 ---
 
 """
-        memory_footer = f"\n\n---\n### 🧠 Deliberation Memory\n[Open Full Memory Log](file:///./memory_logs/{task_id}.json)"
-        full_content = frontmatter + content + memory_footer
+        
+        # Add backlink if source_file_path is provided
+        backlink_content = ""
+        if source_file_path:
+            # Assuming vault name is part of the vault_path, or can be configured
+            # For now, let's just use the relative path, Obsidian can resolve it
+            # Or a simple file:/// link
+            # A more robust solution might involve knowing the Obsidian vault name dynamically
+            # For demonstration, we'll use a direct file link or an assumed relative path if within vault
+            relative_source_path = os.path.relpath(source_file_path, self.vault_path).replace("\\", "/")
+            # Try to make an Obsidian URI if it's a markdown file, otherwise a file link
+            if source_file_path.endswith(".md"):
+                # This requires knowing the vault name. Let's assume a placeholder for now or pass it
+                # For now, a simpler file link. User can configure vault path to their Obsidian vault root
+                vault_name = os.path.basename(os.path.normpath(self.vault_path.split('/AI-Help/')[0])) # Heuristic for vault name
+                if vault_name:
+                     backlink_content = f"[Source Document](obsidian://open?vault={vault_name}&file={relative_source_path})\n\n"
+                else:
+                     backlink_content = f"[Source Document](file:///{source_file_path})\n\n"
+            else: # For PDFs or other files, use a direct file link
+                backlink_content = f"[Source Document](file:///{source_file_path})\n\n"
+
+        # Generate the specific report name format for memory
+        report_name = filename.replace('.md', '')
+        
+        memory_footer = f"\n\n---\n### 🧠 Deliberation Memory\n[Open Full Memory Log](file:///./memory_logs/{report_name}-mem.json)"
+        full_content = frontmatter + backlink_content + content + memory_footer
         
         try:
             with open(file_path, 'w', encoding='utf-8') as f:
@@ -53,10 +80,16 @@ task_id: {task_id}
             print(f"❌ Failed to write to Obsidian: {e}")
             return ""
 
-    def save_memory_log(self, task_id: str, memory_data: dict):
+    def save_memory_log(self, task_id: str, memory_data: dict, report_name: str = None):
         """Saves a copy of the boardroom memory JSON into the Obsidian vault for backlinking."""
         import json
-        memory_file = os.path.join(self.memory_path, f"{task_id}.json")
+        if report_name:
+            safe_report = "".join([c for c in report_name if c.isalpha() or c.isdigit() or c=='_']).rstrip()
+            filename = f"{safe_report}-mem.json"
+        else:
+            filename = f"{task_id}.json"
+            
+        memory_file = os.path.join(self.memory_path, filename)
         try:
             with open(memory_file, 'w', encoding='utf-8') as f:
                 json.dump(memory_data, f, indent=2, ensure_ascii=False)

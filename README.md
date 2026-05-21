@@ -1,17 +1,33 @@
-# 🧠 Cognitive OS
+# 🧠 Cognitive OS — v2.1.0
 
-Cognitive OS is an offline-first AI Orchestrator that transforms your local hardware (via LM Studio) into a fully automated **Sequential Boardroom**. 
+> An offline-first, multi-agent AI orchestrator that transforms your local hardware into an automated **Sequential Boardroom**, a **visual Kanban development pipeline**, and a **browser-based Control Panel** — all powered by LM Studio.
 
-It accepts prompts from your phone (Telegram) or your notes (Obsidian), automatically determines the task complexity, and dynamically unloads/loads specific local LLMs into VRAM to act as a council of experts before synthesizing a final answer into your vault.
+It accepts prompts from your phone (Telegram), your notes (Obsidian), or a browser (Control Panel). It automatically determines task complexity, dynamically loads/unloads specific local LLMs into VRAM to act as a council of experts, and synthesizes a final answer directly into your Obsidian vault.
+
+---
+
+## ✨ What's New in v2.1.0
+| Feature | Description |
+|---|---|
+| 🎛️ **Web Control Panel** | Browser-based GUI to edit all roles/models live — no JSON editing, no restart |
+| 📋 **Kanban Automation** | Drag a card in Obsidian → LLM auto-triggers the next lifecycle phase |
+| 🔌 **Kanban Status Plugin** | New Obsidian plugin syncs card status to YAML frontmatter in real-time |
+| 🔧 **Robust Phase Handoffs** | Regex-based transitions that survive any LLM output formatting |
+| 📦 **Version Manager** | Automated SemVer bumping across all project files |
+
+---
 
 ## 🚀 Features
 
-- **Zero-VRAM Sentry Router**: Instantly classifies prompt complexity using Python heuristics.
-- **JIT Model Loading**: Maximizes hardware limits by automatically ejecting active models (`/api/v1/models/unload`) and hot-swapping specialized models into VRAM one by one.
-- **The Boardroom**: Uses a 6-model pipeline: Strategist, Specialist, Critic, Creative, Logical, and Overseer.
-- **Obsidian Auto-Writer**: Final documents are formatted with YAML metadata and injected directly into your local Markdown vault.
-- **Telegram Mobile Interface**: Whitelisted bot access provides real-time progress callbacks to your phone while the local rig processes complex tasks.
-- **FastAPI Endpoint**: Exposes the orchestrator to local network plugins.
+- **Zero-VRAM Sentry Router** — Instantly classifies prompt complexity using Python heuristics, no model loaded
+- **JIT Model Loading** — Auto-ejects active models and hot-swaps specialized models into VRAM one by one
+- **The Boardroom** — 6-model sequential pipeline: Strategist → Specialist → Critic → Creative → Logical → Chairman
+- **Kanban Lifecycle** — Drag cards in Obsidian Kanban to progress proposals through 5 automated LLM phases
+- **Web Control Panel** — Live editing of all role configs, system prompts, and model parameters in the browser
+- **Obsidian Auto-Writer** — Final documents formatted with YAML metadata, injected into your vault
+- **Telegram Mobile Interface** — Whitelisted bot with real-time progress callbacks, voice transcription, image analysis
+- **FastAPI Endpoint** — Exposes the orchestrator to local network plugins
+- **9 Execution Patterns** — SIMPLE, STANDARD, BOARDROOM, TECHNICAL, DESIGN, ORACLE, NFT, DEV LIFECYCLE, ONLINE
 
 ---
 
@@ -19,102 +35,266 @@ It accepts prompts from your phone (Telegram) or your notes (Obsidian), automati
 
 ### 1. Prerequisites
 - **Python 3.10+**
-- **LM Studio**: Must be running on your local network (e.g., `http://localhost:1234/v1`).
-  - *Critical Setting*: You must enable **"Just-In-Time Model Loading"** (or "Evict model when VRAM is needed") in the LM Studio Local Server settings.
-- **Hardware**: Sufficient RAM/VRAM to hold your largest individual model. (The orchestrator handles eviction, so you only need enough memory for *one* model at a time).
+- **LM Studio**: Must be running on `http://localhost:1234/v1`
+  - *Critical Setting*: Enable **"Just-In-Time Model Loading"** in LM Studio Server settings
+- **Hardware**: Sufficient RAM/VRAM for your largest individual model (orchestrator handles eviction — only one model loaded at a time)
 
 ### 2. Installation
 ```bash
-git clone https://github.com/Oranneg-debug/cognitive-os.git
-cd cognitive-os
+git clone https://github.com/Oranneg-debug/Antigravity.git
+cd Antigravity/cognitive-os
 pip install -r requirements.txt
 ```
 
 ### 3. Configuration
 
-**A. Models & Roles**
-Open `src/orchestrator.py` and configure your models in the `ROLES_CONFIG` dictionary. This is where you set the system prompts, temperatures, and define your **default boot LLM** (under the `simple` and `standard` roles).
+#### A. Models & Roles — Centralized Config
 
-```python
-ROLES_CONFIG = {
-    "simple": {
-        "model": "qwen3.5-9b-claude-4.6-highiq-instruct-heretic-uncensored", # Default Boot LLM
-        "system_prompt": "You are a fast, precise assistant. Be concise.",
-        "temperature": 0.3,
-        # ...
-    },
-    "strategist": {
-        "model": "hermes-4-70b",
-        # ...
+All model settings are defined in **one source of truth**: `cognitive-os/config/models_config.json`
+
+```json
+{
+  "models": {
+    "ministral-3-3b-instruct-2512": {
+      "temperature": 0.4,
+      "top_p": 0.9,
+      "context_window": 131072,
+      "gpu_layers": -1
     }
+  },
+  "roles": {
+    "simple": {
+      "model": "ministral-3-3b-instruct-2512",
+      "temperature": 0.4,
+      "system_prompt": "You are..."
+    }
+  }
 }
 ```
-*Tip: You control the **temperature**, **system prompt**, and **top_k/top_p** for EVERY model directly in this dictionary. The Python Orchestrator dynamically injects these parameters into LM Studio per-request!*
 
-> [!NOTE]
-> **Applying Role Changes**
-> Cognitive OS is built in Python, so there is **no compilation step**. If you modify your role prompts (for example, in external Markdown files), simply copy the updated prompts into the `ROLES_CONFIG` dictionary in `src/orchestrator.py` and save the file. 
-> To apply the changes, close the terminal windows running your services and run `start_services.bat` again to reboot the servers with the updated configuration.
+**To change a model setting — 3 options:**
 
-**B. Environment Variables**
-Create a `.env` file in the root directory:
+**Option 1: Web Control Panel (Recommended)**
+1. Start services (see below)
+2. Open `http://localhost:5000` in your browser
+3. Select any role from the sidebar → adjust sliders/inputs → click **Save Configuration**
+4. Changes apply instantly — **no restart required**
+
+**Option 2: Edit JSON directly**
+1. Open `cognitive-os/config/models_config.json`
+2. Modify the desired field
+3. Restart the FastAPI server
+
+**Option 3: Python API**
+```python
+from cognitive_os.src.orchestrator import update_role_config, get_model_config
+
+config = get_model_config("hermes-4-70b")
+update_role_config("simple", {"temperature": 0.5})
+```
+
+#### B. Environment Variables
+
+Create a `.env` file in `cognitive-os/`:
 ```env
 TELEGRAM_BOT_TOKEN=your_botfather_token_here
 ALLOWED_TELEGRAM_USER_ID=your_telegram_user_id
 SOVEREIGN_COMPASS_PATH="E:/path/to/your/obsidian/vault/Sovereign_Compass.md"
 ```
-*Tip: The `SOVEREIGN_COMPASS_PATH` can point anywhere on your system. We recommend pointing it directly to a markdown file inside your Obsidian vault so you can edit your system's core values seamlessly within Obsidian!*
 
-**C. Obsidian Vault Path**
-Open `src/obsidian_writer.py` and update the `self.vault_path` to point to your actual Obsidian vault directory.
+#### C. Obsidian Vault Path
+
+Open `src/obsidian_writer.py` and update `self.vault_path` to point to your actual Obsidian vault directory.
+
+---
 
 ### 4. Running the OS
 
 **Method 1: Windows Terminal Auto-Boot (Recommended)**
-Double-click `start_services.bat`. This will instantly launch a **Windows Terminal (`wt`)** window with 3 live tabs so you can monitor the stack:
-1. **LM Studio Server**: Runs headlessly and binds to `0.0.0.0` for local network access.
-2. **FastAPI Server**: Handles routing.
-3. **Telegram Bot**: Handles mobile interfaces.
 
-*Auto-Loader*: Exactly 10 seconds after booting, a background script will automatically inject your standard RAG Embedder (`text-embedding-bge-m3`) and your Default Boot LLM (`ministral-3-3b-instruct-2512`) into VRAM so the system is instantly ready to answer simple requests.
-
-*(To make the stack run automatically every time you boot your PC, we use a hidden VBS wrapper. Place `StartCognitiveOS.vbs` in your Windows Startup folder: `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup`).*
-
-⚠️ **Important Warning: LM Studio GUI**
-**Do NOT** open the LM Studio desktop application while the Cognitive OS background server is running.
-1. **Port Conflicts**: The GUI will attempt to bind to port 1234, colliding with your headless server.
-2. **VRAM Hijacking**: The GUI forces its own internal presets, which will instantly eject your Auto-Loaded models (Embedder & Default LLM) out of your VRAM.
-
-*If you need to monitor VRAM or see what models are actively loaded, do not use the GUI. Instead, open a normal command prompt and type `lms ps`. To view live logs, simply check the LM Studio Server tab in your Windows Terminal.*
-
-**Method 2: Manual Terminal**
-Terminal 1 (Obsidian API):
 ```bash
+start_services.bat
+```
+
+This opens a **Windows Terminal** with **4 live tabs**:
+
+| Tab | Service | Purpose |
+|---|---|---|
+| 1 | **LM Studio Server** | Local inference, bound to `0.0.0.0` for network access |
+| 2 | **FastAPI Server** | REST API + Web Control Panel on port 5000 |
+| 3 | **Telegram Bot** | Mobile interface |
+| 4 | **Kanban Watcher** ⭐ | Monitors `Dev-KanBan.md`, triggers LLM on card moves |
+
+*Auto-Loader*: 10 seconds after booting, a background script injects the RAG Embedder (`text-embedding-bge-m3`) and Default Boot LLM (`ministral-3-3b-instruct-2512`) into VRAM.
+
+**⚠️ Important: Do NOT open the LM Studio GUI** while the background server is running:
+- The GUI will bind to port 1234, causing port conflicts
+- The GUI will hijack VRAM, ejecting your auto-loaded models
+
+To check loaded models: open a terminal and run `lms ps`.
+
+**Method 2: Manual Terminals**
+
+```bash
+# Terminal 1 — FastAPI + Dashboard
 python -m src.api
-```
-Terminal 2 (Telegram Bot):
-```bash
+
+# Terminal 2 — Telegram Bot
 python -m src.telegram_bot
+
+# Terminal 3 — Kanban Watcher
+python -m src.kanban_processor --watch
 ```
+
+---
+
+## 🎛️ Web Control Panel Dashboard
+
+Open `http://localhost:5000` after starting services.
+
+### Tabs
+
+| Tab | What You Can Do |
+|---|---|
+| **Configuration** | Select any role or model from the grouped sidebar. Edit all parameters live. |
+| **System Structure** | View the full component map as an interactive Mermaid diagram |
+| **Request Flow** | View the request lifecycle as a sequence diagram |
+| **Kanban Workflow** | View the Kanban automation state machine |
+
+### Sidebar Groups
+
+Roles are organized into collapsible groups:
+- **Dev Lifecycle** — `dev_*` roles
+- **Boardroom** — `board_*` roles  
+- **Technical Meeting** — `technical_*` roles
+- **Design Meeting** — `design_*` roles
+- **System & Base** — `simple`, `standard`, `vision`, `nft_specialist`
+- **Core Flow Control** — `moderator`, `brand_guard`, `scribe`
+
+### Test Panel
+
+Type any prompt and click **Run Test** to send it to the `simple` role directly — useful for verifying model configs.
+
+---
+
+## 📋 Kanban Board Integration
+
+Drag cards in your Obsidian Kanban board to automatically trigger LLM lifecycle phases.
+
+### How It Works
+
+```
+Drag card in Obsidian → Watcher detects change (1s poll) →
+Wait 2s debounce → Parse board → Detect movement →
+Update proposal YAML frontmatter → Trigger LLM phase → Done ✅
+```
+
+### The Flow
+
+```
+Backlog → Proposal → Beta Testing → Alpha Polish → Finalized → Deployed
+```
+
+| Move | LLM Triggered |
+|---|---|
+| Backlog → Proposal | DeepSeek-Coder-V2-Lite formalizes the idea |
+| Proposal → Beta Testing | Qwen3.6-35B reviews + creates implementation plan |
+| Beta Testing → Alpha Polish | qwen3-coder-next optimizes GUI/performance |
+| Alpha Polish → Finalized | deepseek-r1-70b performs compliance audit |
+
+### Manual Testing
+
+```bash
+# Standalone watcher (for testing)
+scripts\watch-kanban.bat
+
+# Force-reprocess all cards
+python -m cognitive-os.src.kanban_processor --force
+
+# One-time sync
+python -m cognitive-os.src.kanban_processor --sync
+```
+
+See [dev/KANBAN_INTEGRATION.md](../dev/KANBAN_INTEGRATION.md) for full documentation.
 
 ---
 
 ## 📱 Interfaces
 
-### Using from Telegram
-1. Message your configured bot.
-2. If unauthorized, it will reject you. If authorized, it begins the analysis.
-3. You will receive live updates (e.g., `🧠 CRITIC is deliberating...`) as LM Studio hot-swaps the models on your PC.
-4. The final markdown is sent back to the chat and saved to Obsidian.
+### Telegram
 
-### Using from Obsidian
-1. **Ensure the API is Running**: You must have the FastAPI server running (`python -m src.api` or by double-clicking `start_services.bat`). By default, it runs on port 5000.
-2. **Install the Plugin**: Build and install the local `obsidian-lmstudio-agent` plugin into your Obsidian vault.
-3. **Configure the Plugin**: Open Obsidian Settings -> **LM Studio Agent** -> Expand the **🧠 Cognitive OS** section. Ensure the API endpoint matches your FastAPI server (default: `http://127.0.0.1:5000/process`).
-4. **Select Text**: Highlight text in any note.
-5. **Route to Council**: Open the Command Palette (`Ctrl+P`) and search for `Cognitive OS`. You will see 4 options:
-   - `Cognitive OS: Auto-Route Council` (Relies on the Python heuristic router)
-   - `Cognitive OS: Design Council` (Forces the Creative Council via `/design`)
-   - `Cognitive OS: Technical Council` (Forces the Technical Council via `/technical`)
-   - `Cognitive OS: Boardroom` (Forces the full Sequential Boardroom via `/boardroom`)
-6. A background POST request is sent to your FastAPI server. Minutes later, the synthesized master document appears in your vault's memory folder.
+1. Message your configured bot
+2. Unauthorized users are rejected; authorized users receive live updates
+3. You'll see messages like `🧠 CRITIC is deliberating...` as models hot-swap
+4. Final markdown is sent back and saved to Obsidian
+
+**Commands:**
+- `/start` — Show your user ID (needed for whitelist)
+- `/dev <proposal>` — Create a development lifecycle proposal
+- `/search [term]` — Search vault content
+
+### Obsidian Plugin
+
+1. Ensure FastAPI is running on port 5000
+2. Build and install `obsidian-lmstudio-agent` into your vault
+3. Open Settings → **LM Studio Agent** → verify API endpoint: `http://127.0.0.1:5000/process`
+4. Select text → Command Palette (`Ctrl+P`) → search `Cognitive OS`:
+
+| Command | Description |
+|---|---|
+| **Auto-Route Council** | Sentry Router picks the best pattern automatically |
+| **Design Council** | Forces DESIGN_MEETING pattern |
+| **Technical Council** | Forces TECHNICAL_MEETING pattern |
+| **Boardroom** | Forces SEQUENTIAL_BOARDROOM pattern |
+
+---
+
+## 🧠 Documentation
+
+| Document | Contents |
+|---|---|
+| [docs/SYSTEM_ARCHITECTURE.md](../docs/SYSTEM_ARCHITECTURE.md) | Full system diagrams — components, flows, Kanban, Dashboard |
+| [docs/MODEL_ORCHESTRATION.md](../docs/MODEL_ORCHESTRATION.md) | Model tiers, VRAM strategy, role system, lifecycle approval |
+| [docs/CHANGELOG.md](../docs/CHANGELOG.md) | Version history — what changed in each release |
+| [dev/KANBAN_INTEGRATION.md](../dev/KANBAN_INTEGRATION.md) | Kanban automation deep-dive |
+| [QUICK_START_KANBAN.md](../QUICK_START_KANBAN.md) | Quick onboarding for Kanban workflow |
+
+---
+
+## 📊 Model Inventory (Quick Reference)
+
+| Layer | Model | Temp | Purpose |
+|---|---|---|---|
+| Reflex | `ministral-3-3b-instruct-2512` | 0.4 | Fast responses, moderation, scribing |
+| Vision | `qwen3-vl-4b-thinking` | 0.2 | Image analysis |
+| Specialist | `qwen3.6-27b-heretic-…` | 0.2 | Technical tasks, code generation |
+| Creative | `hermes-4.3-36b` | 1.1 | Brainstorming, creative expansion |
+| God-Tier | `hermes-4-70b` | 0.4 | Final synthesis, chairman |
+| Critic | `deepseek-r1-distill-qwen-32b` | 0.1 | Rigorous critique, validation |
+| Logical | `gemma-4-31b-it` | 0.1 | Formal reasoning, structure |
+| Overseer | `qwen3.5-35b-a3b-…` | 0.4 | Technical oversight |
+| Brand | `gemma-4-e4b-uncensored` | 0.1 | Sovereign Compass enforcement |
+
+See [docs/MODEL_ORCHESTRATION.md](../docs/MODEL_ORCHESTRATION.md) for the complete table with all parameters.
+
+---
+
+## 🔧 Pattern Types
+
+| Pattern | Description |
+|---|---|
+| SIMPLE | Single fast model pass (Reflex Layer) |
+| STANDARD | Single standard model + preset |
+| SEQUENTIAL_BOARDROOM | 6-agent strategic meeting + Chairman synthesis |
+| ONLINE_BOARDROOM | Same as above, routed to cloud/frontier models |
+| DESIGN_MEETING | Design team: Junior → Creative → Critic → Senior |
+| TECHNICAL_MEETING | Tech team: Specialist → Creative → Critic → Overseer |
+| ORACLE_COUNCIL | Strategist → Critic → Logical → Chairman |
+| NFT_CREATION | NFT metadata generation pipeline |
+| DEVELOPMENT_LIFECYCLE | 4-phase dev route (Proposal → Beta → Alpha → Release) |
+
+See [docs/SYSTEM_ARCHITECTURE.md](../docs/SYSTEM_ARCHITECTURE.md) for flow diagrams of each pattern.
+
+---
+
+*Cognitive OS v2.1.0 — Antigravity Development Team*
