@@ -495,3 +495,308 @@ header {
     line-height: 1.5;
     margin: 0;
 }
+/* ===================================================================
+ * LM Studio tab — Dark Maestro "Instrument Readout"
+ * Monochrome on onyx, single gold accent (#c9a227), Iosevka Mono,
+ * subtle scanline texture. No widget libraries.
+ * =================================================================== */
+
+:root {
+    --lms-gold: #c9a227;
+    --lms-gold-dim: #8a6d1a;
+    --lms-ink: #cfcfcf;
+    --lms-ink-dim: #6e6e6e;
+    --lms-line: #2a2a2a;
+    --lms-line-bright: #3a3a3a;
+    --lms-panel-bg: #0e0e0e;
+    --lms-panel-bg-deep: #060606;
+}
+
+.lms-page {
+    font-family: "Iosevka", "Iosevka Mono", "Fira Code", "JetBrains Mono",
+                 "Consolas", "Menlo", monospace;
+    color: var(--lms-ink);
+    padding: clamp(1rem, 3vw, 4rem);
+    background:
+        repeating-linear-gradient(
+            0deg,
+            rgba(255, 255, 255, 0.012) 0px,
+            rgba(255, 255, 255, 0.012) 1px,
+            transparent 1px,
+            transparent 3px
+        ),
+        var(--lms-panel-bg-deep);
+    min-height: calc(100vh - 80px);
+}
+
+.lms-header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    border-bottom: 1px solid var(--lms-line-bright);
+    padding-bottom: 0.5rem;
+    margin-bottom: 1.5rem;
+    flex-wrap: wrap;
+    gap: 1rem;
+}
+
+.lms-header h1 {
+    font-family: inherit;
+    font-weight: 400;
+    letter-spacing: 0.04em;
+    margin: 0;
+    color: var(--lms-gold);
+    font-size: 1.5rem;
+}
+
+.lms-header h1::before {
+    content: ">> ";
+    color: var(--lms-gold-dim);
+}
+
+.lms-subtabs {
+    display: flex;
+    gap: 0;
+}
+
+.lms-subtab-link {
+    background: transparent;
+    border: 1px solid var(--lms-line);
+    border-bottom: none;
+    color: var(--lms-ink-dim);
+    font-family: inherit;
+    font-size: 0.85rem;
+    padding: 0.4rem 1rem;
+    cursor: pointer;
+    letter-spacing: 0.04em;
+    transition: color 120ms ease, border-color 120ms ease;
+}
+
+.lms-subtab-link:hover {
+    color: var(--lms-ink);
+    border-color: var(--lms-line-bright);
+}
+
+.lms-subtab-link.active {
+    color: var(--lms-gold);
+    border-color: var(--lms-gold-dim);
+    background: var(--lms-panel-bg);
+}
+
+.lms-subtab {
+    display: none;
+}
+.lms-subtab.active {
+    display: block;
+}
+
+.lms-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 1rem;
+}
+
+.lms-bench-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 1rem;
+}
+
+.lms-loaded { grid-column: 1 / -1; }
+.lms-loadform { grid-column: span 2; min-width: 0; }
+.lms-result { grid-column: 1 / -1; }
+
+@media (max-width: 700px) {
+    .lms-loadform { grid-column: 1 / -1; }
+}
+
+.lms-card {
+    background: var(--lms-panel-bg);
+    border: 1px solid var(--lms-line);
+    padding: 0;
+    min-width: 0;
+}
+
+.lms-card-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid var(--lms-line);
+    background: linear-gradient(180deg,
+        rgba(201, 162, 39, 0.04) 0%,
+        transparent 100%);
+}
+
+.lms-card-title {
+    color: var(--lms-gold-dim);
+    font-size: 0.78rem;
+    letter-spacing: 0.08em;
+}
+
+.lms-link-btn {
+    background: transparent;
+    border: none;
+    color: var(--lms-ink-dim);
+    font-family: inherit;
+    font-size: 0.78rem;
+    cursor: pointer;
+    padding: 0.2rem 0.4rem;
+    letter-spacing: 0.04em;
+}
+.lms-link-btn:hover {
+    color: var(--lms-gold);
+}
+
+.lms-primary-btn {
+    background: transparent;
+    border: 1px solid var(--lms-gold-dim);
+    color: var(--lms-gold);
+    font-family: inherit;
+    font-size: 0.85rem;
+    padding: 0.5rem 1.5rem;
+    cursor: pointer;
+    letter-spacing: 0.06em;
+    text-transform: lowercase;
+    transition: background 120ms, color 120ms;
+}
+.lms-primary-btn:hover:not(:disabled) {
+    background: var(--lms-gold);
+    color: #000;
+}
+.lms-primary-btn:disabled {
+    opacity: 0.4;
+    cursor: wait;
+}
+
+.lms-table-wrap {
+    overflow: auto;
+    max-height: 60vh;
+}
+
+.lms-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.82rem;
+}
+
+.lms-table th {
+    text-align: left;
+    color: var(--lms-gold-dim);
+    font-weight: 400;
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid var(--lms-line);
+    background: rgba(255, 255, 255, 0.015);
+    position: sticky;
+    top: 0;
+    letter-spacing: 0.04em;
+}
+
+.lms-table td {
+    padding: 0.4rem 0.75rem;
+    border-bottom: 1px solid var(--lms-line);
+    color: var(--lms-ink);
+    font-variant-numeric: tabular-nums;
+}
+
+.lms-table tbody tr:hover {
+    background: rgba(201, 162, 39, 0.04);
+    cursor: pointer;
+}
+
+.lms-table tbody tr.selected {
+    background: rgba(201, 162, 39, 0.08);
+}
+
+.lms-empty {
+    color: var(--lms-ink-dim);
+    text-align: center;
+    padding: 1rem;
+    font-style: italic;
+}
+
+.lms-form {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 0.75rem;
+    padding: 1rem;
+}
+
+.lms-field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    min-width: 0;
+}
+
+.lms-field-wide {
+    grid-column: 1 / -1;
+}
+
+.lms-field-check {
+    flex-direction: row;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.lms-field > span {
+    font-size: 0.72rem;
+    color: var(--lms-gold-dim);
+    letter-spacing: 0.06em;
+    text-transform: lowercase;
+}
+
+.lms-field input[type="text"],
+.lms-field input[type="number"],
+.lms-field input:not([type]),
+.lms-field select {
+    background: var(--lms-panel-bg-deep);
+    border: 1px solid var(--lms-line);
+    color: var(--lms-ink);
+    font-family: inherit;
+    font-size: 0.85rem;
+    padding: 0.4rem 0.5rem;
+    border-radius: 0;
+    min-width: 0;
+}
+
+.lms-field input:focus,
+.lms-field select:focus {
+    outline: none;
+    border-color: var(--lms-gold-dim);
+}
+
+.lms-field input[type="checkbox"] {
+    accent-color: var(--lms-gold);
+}
+
+.lms-form-actions {
+    grid-column: 1 / -1;
+    display: flex;
+    gap: 1rem;
+    align-items: center;
+    border-top: 1px solid var(--lms-line);
+    padding-top: 0.75rem;
+}
+
+.lms-result-panel {
+    background: var(--lms-panel-bg-deep);
+    border: none;
+    color: var(--lms-ink);
+    padding: 0.75rem;
+    margin: 0;
+    font-family: inherit;
+    font-size: 0.82rem;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 50vh;
+    overflow: auto;
+}
+
+.lms-result-panel em {
+    color: var(--lms-ink-dim);
+}
+
+.lms-result-panel .lms-ok { color: var(--lms-gold); }
+.lms-result-panel .lms-err { color: #c41e3a; }

@@ -42,6 +42,7 @@
                 <div class="tabs">
                     <button class="tab-link active" data-tab="config">Configuration</button>
                     <button class="tab-link" data-tab="orchestrations">Orchestrations</button>
+                    <button class="tab-link" data-tab="lmstudio">LM Studio</button>
                     <button class="tab-link" data-tab="structure">System Structure</button>
                     <button class="tab-link" data-tab="flow">Request Flow</button>
                     <button class="tab-link" data-tab="kanban">Kanban Workflow</button>
@@ -97,6 +98,172 @@
                         <div class="orch-meta"></div>
                         <pre class="orch-response"><em>No run yet.</em></pre>
                     </div>
+                </div>
+            </div>
+
+            <div id="lmstudio" class="tab-content">
+                <div class="lms-page">
+                    <header class="lms-header">
+                        <h1>LM Studio</h1>
+                        <div class="lms-subtabs">
+                            <button class="lms-subtab-link active" data-subtab="console">Console</button>
+                            <button class="lms-subtab-link" data-subtab="benchmarks">Benchmarks</button>
+                        </div>
+                    </header>
+
+                    <!-- ===== CONSOLE ===== -->
+                    <section id="lms-console" class="lms-subtab active">
+                        <div class="lms-grid">
+                            <!-- Loaded models readout -->
+                            <article class="lms-card lms-loaded">
+                                <header class="lms-card-head">
+                                    <span class="lms-card-title">// loaded models</span>
+                                    <button id="lms-refresh-btn" class="lms-link-btn"
+                                        title="Refresh loaded list">↻ refresh</button>
+                                </header>
+                                <div class="lms-table-wrap">
+                                    <table class="lms-table" id="lms-loaded-table">
+                                        <thead>
+                                            <tr>
+                                                <th>identifier</th>
+                                                <th>model_key</th>
+                                                <th>ctx</th>
+                                                <th></th>
+                                            </tr>
+                                        </thead>
+                                        <tbody><tr><td colspan="4" class="lms-empty">loading…</td></tr></tbody>
+                                    </table>
+                                </div>
+                            </article>
+
+                            <!-- Load form -->
+                            <article class="lms-card lms-loadform">
+                                <header class="lms-card-head">
+                                    <span class="lms-card-title">// load / reload</span>
+                                </header>
+                                <form id="lms-load-form" class="lms-form">
+                                    <label class="lms-field lms-field-wide">
+                                        <span>model_key</span>
+                                        <input list="lms-catalog" name="model_key" required
+                                            placeholder="e.g. hermes-4.3-36b-heretic-i1">
+                                        <datalist id="lms-catalog"></datalist>
+                                    </label>
+
+                                    <label class="lms-field">
+                                        <span>identifier</span>
+                                        <input name="identifier" placeholder="optional override">
+                                    </label>
+
+                                    <label class="lms-field">
+                                        <span>context_length</span>
+                                        <input name="context_length" type="number" min="512"
+                                            placeholder="65536">
+                                    </label>
+
+                                    <label class="lms-field">
+                                        <span>n_parallel</span>
+                                        <input name="n_parallel" type="number" min="1" max="16"
+                                            placeholder="1">
+                                    </label>
+
+                                    <label class="lms-field">
+                                        <span>flash_attention</span>
+                                        <select name="flash_attention">
+                                            <option value="">— inherit —</option>
+                                            <option value="true">true</option>
+                                            <option value="false">false</option>
+                                        </select>
+                                    </label>
+
+                                    <label class="lms-field">
+                                        <span>gpu_offload_ratio</span>
+                                        <input name="gpu_offload_ratio" type="number"
+                                            min="0" max="1" step="0.05" placeholder="1.0">
+                                    </label>
+
+                                    <label class="lms-field">
+                                        <span>cache_type_k</span>
+                                        <select name="cache_type_k">
+                                            <option value="">— inherit —</option>
+                                            <option value="f16">f16</option>
+                                            <option value="q8_0">q8_0</option>
+                                            <option value="q4_0">q4_0</option>
+                                        </select>
+                                    </label>
+
+                                    <label class="lms-field">
+                                        <span>cache_type_v</span>
+                                        <select name="cache_type_v">
+                                            <option value="">— inherit —</option>
+                                            <option value="f16">f16</option>
+                                            <option value="q8_0">q8_0</option>
+                                            <option value="q4_0">q4_0</option>
+                                        </select>
+                                    </label>
+
+                                    <label class="lms-field">
+                                        <span>ttl (seconds)</span>
+                                        <input name="ttl" type="number" min="0" placeholder="∞">
+                                    </label>
+
+                                    <label class="lms-field lms-field-check">
+                                        <input type="checkbox" name="force_reload">
+                                        <span>force_reload (evict existing)</span>
+                                    </label>
+
+                                    <div class="lms-form-actions">
+                                        <button type="submit" class="lms-primary-btn"
+                                            id="lms-load-submit">load</button>
+                                        <button type="button" class="lms-link-btn"
+                                            id="lms-catalog-refresh-btn">↻ refresh catalog</button>
+                                    </div>
+                                </form>
+                            </article>
+
+                            <!-- Result panel -->
+                            <article class="lms-card lms-result">
+                                <header class="lms-card-head">
+                                    <span class="lms-card-title">// last action</span>
+                                </header>
+                                <pre id="lms-result-panel" class="lms-result-panel"><em>no requests yet.</em></pre>
+                            </article>
+                        </div>
+                    </section>
+
+                    <!-- ===== BENCHMARKS ===== -->
+                    <section id="lms-benchmarks" class="lms-subtab">
+                        <div class="lms-bench-grid">
+                            <article class="lms-card">
+                                <header class="lms-card-head">
+                                    <span class="lms-card-title">// bench history</span>
+                                    <button id="lms-bench-refresh-btn" class="lms-link-btn"
+                                        title="Reload bench JSONL">↻ reload</button>
+                                </header>
+                                <div class="lms-table-wrap">
+                                    <table class="lms-table" id="lms-bench-table">
+                                        <thead>
+                                            <tr>
+                                                <th>timestamp</th>
+                                                <th>model_key</th>
+                                                <th>ctx</th>
+                                                <th>client tps</th>
+                                                <th>server eval</th>
+                                                <th>pp</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody><tr><td colspan="6" class="lms-empty">loading…</td></tr></tbody>
+                                    </table>
+                                </div>
+                            </article>
+
+                            <article class="lms-card">
+                                <header class="lms-card-head">
+                                    <span class="lms-card-title">// detail</span>
+                                </header>
+                                <pre id="lms-bench-detail" class="lms-result-panel"><em>select a row.</em></pre>
+                            </article>
+                        </div>
+                    </section>
                 </div>
             </div>
 

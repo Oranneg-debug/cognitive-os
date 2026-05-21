@@ -302,6 +302,12 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
+        // LM Studio tab: refresh loaded + catalog + benches on open
+        if (tabName === 'lmstudio') {
+            lmstudio.activate();
+            return;
+        }
+
         // Load content for diagram tabs if they haven't been loaded yet
         if (tabName !== 'config' && !document.getElementById(tabName).hasAttribute('data-loaded')) {
             loadDiagram(tabName);
@@ -541,6 +547,233 @@ document.addEventListener('DOMContentLoaded', () => {
     saveBtn.addEventListener('click', handleSaveClick);
     testBtn.addEventListener('click', handleTestClick);
     tabs.forEach(tab => tab.addEventListener('click', handleTabClick));
+
+    // =========================================================================
+    // LM Studio control module
+    // -------------------------------------------------------------------------
+    // Wires the LM Studio tab: Console (loaded models, load form, result panel)
+    // and Benchmarks (JSONL history + detail panel). Talks to the API on
+    // localhost:5000, never to LM Studio directly.
+    // =========================================================================
+    const lmstudio = (() => {
+        const $ = (id) => document.getElementById(id);
+        let benchRowsCache = [];
+        let activated = false;
+
+        const fmt = (v) => (v === null || v === undefined ? '—' : String(v));
+
+        function renderResult(obj, kind /* 'ok' | 'err' */) {
+            const el = $('lms-result-panel');
+            if (!el) return;
+            const pretty = (typeof obj === 'string')
+                ? obj
+                : JSON.stringify(obj, null, 2);
+            el.innerHTML = '';
+            const span = document.createElement('span');
+            span.className = kind === 'err' ? 'lms-err' : 'lms-ok';
+            span.textContent = pretty;
+            el.appendChild(span);
+        }
+
+        async function refreshLoaded() {
+            const tbody = $('lms-loaded-table').querySelector('tbody');
+            tbody.innerHTML = '<tr><td colspan="4" class="lms-empty">loading…</td></tr>';
+            try {
+                const r = await fetch('/api/loaded');
+                if (!r.ok) throw new Error(`HTTP ${r.status}`);
+                const data = await r.json();
+                const loaded = data.loaded || [];
+                if (loaded.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="4" class="lms-empty">no models loaded</td></tr>';
+                } else {
+                    tbody.innerHTML = loaded.map(inst => `
+                        <tr>
+                            <td>${fmt(inst.identifier)}</td>
+                            <td>${fmt(inst.model_key)}</td>
+                            <td>${fmt(inst.context_length)}</td>
+                            <td>
+                                <button class="lms-link-btn" data-unload="${encodeURIComponent(inst.identifier || '')}">unload</button>
+                            </td>
+                        </tr>
+                    `).join('');
+                    tbody.querySelectorAll('button[data-unload]').forEach(btn => {
+                        btn.addEventListener('click', async () => {
+                            const ident = decodeURIComponent(btn.dataset.unload);
+                            if (!ident) return;
+                            btn.disabled = true;
+                            btn.textContent = 'unloading…';
+                            try {
+                                const res = await fetch(`/api/load/${encodeURIComponent(ident)}`, { method: 'DELETE' });
+                                const out = await res.json();
+                                renderResult(out, res.ok ? 'ok' : 'err');
+                            } catch (e) {
+                                renderResult(String(e), 'err');
+                            }
+                            refreshLoaded();
+                        });
+                    });
+                }
+                // Populate datalist for the load form
+                const dl = $('lms-catalog');
+                if (dl && Array.isArray(data.downloaded)) {
+                    dl.innerHTML = data.downloaded.map(k =>
+                        `<option value="${k.replace(/"/g, '&quot;')}">`).join('');
+                }
+            } catch (e) {
+                tbody.innerHTML = `<tr><td colspan="4" class="lms-empty">error: ${e.message || e}</td></tr>`;
+            }
+        }
+
+        async function refreshCatalog() {
+            try {
+                const r = await fetch('/api/catalog/refresh', { method: 'POST' });
+                const out = await r.json();
+                renderResult(out, r.ok ? 'ok' : 'err');
+                if (r.ok && Array.isArray(out.model_keys)) {
+                    const dl = $('lms-catalog');
+                    if (dl) {
+                        dl.innerHTML = out.model_keys.map(k =>
+                            `<option value="${k.replace(/"/g, '&quot;')}">`).join('');
+                    }
+                }
+            } catch (e) {
+                renderResult(String(e), 'err');
+            }
+        }
+
+        function readForm() {
+            const f = $('lms-load-form');
+            const fd = new FormData(f);
+            const cfg = {};
+            const setIfPresent = (key, transform = v => v) => {
+                const v = fd.get(key);
+                if (v !== null && v !== '') cfg[key] = transform(v);
+            };
+            setIfPresent('context_length', Number);
+            setIfPresent('n_parallel', Number);
+            setIfPresent('gpu_offload_ratio', Number);
+            setIfPresent('cache_type_k');
+            setIfPresent('cache_type_v');
+            const fa = fd.get('flash_attention');
+            if (fa === 'true') cfg.flash_attention = true;
+            else if (fa === 'false') cfg.flash_attention = false;
+
+            const body = {
+                model_key: (fd.get('model_key') || '').trim(),
+                force_reload: fd.get('force_reload') === 'on',
+            };
+            const ident = (fd.get('identifier') || '').trim();
+            if (ident) body.identifier = ident;
+            const ttl = fd.get('ttl');
+            if (ttl !== null && ttl !== '') body.ttl = Number(ttl);
+            if (Object.keys(cfg).length > 0) body.config = cfg;
+            return body;
+        }
+
+        async function handleLoadSubmit(e) {
+            e.preventDefault();
+            const submit = $('lms-load-submit');
+            const body = readForm();
+            if (!body.model_key) {
+                renderResult('model_key is required', 'err');
+                return;
+            }
+            submit.disabled = true;
+            submit.textContent = 'loading…';
+            renderResult(`POST /api/load\n${JSON.stringify(body, null, 2)}\n\n[…]`, 'ok');
+            try {
+                const r = await fetch('/api/load', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body),
+                });
+                const out = await r.json();
+                renderResult(out, r.ok ? 'ok' : 'err');
+            } catch (err) {
+                renderResult(String(err), 'err');
+            } finally {
+                submit.disabled = false;
+                submit.textContent = 'load';
+                refreshLoaded();
+            }
+        }
+
+        async function refreshBenchmarks() {
+            const tbody = $('lms-bench-table').querySelector('tbody');
+            tbody.innerHTML = '<tr><td colspan="6" class="lms-empty">loading…</td></tr>';
+            try {
+                const r = await fetch('/api/benchmarks');
+                if (!r.ok) throw new Error(`HTTP ${r.status}`);
+                const data = await r.json();
+                const runs = data.runs || [];
+                benchRowsCache = runs;
+                if (runs.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="6" class="lms-empty">no runs yet</td></tr>';
+                    return;
+                }
+                tbody.innerHTML = runs.map((r, idx) => {
+                    const ctx = r.config && r.config.context_length;
+                    const cli = r.client_tps;
+                    const srv = r.log && r.log.server_eval_tps;
+                    const pp  = r.log && r.log.pipeline_parallelism;
+                    return `
+                        <tr data-idx="${idx}">
+                            <td>${fmt(r.ts)}</td>
+                            <td>${fmt(r.model_key)}</td>
+                            <td>${fmt(ctx)}</td>
+                            <td>${fmt(cli)}</td>
+                            <td>${fmt(srv)}</td>
+                            <td>${pp === true ? '✓' : pp === false ? '✗' : '—'}</td>
+                        </tr>`;
+                }).join('');
+                tbody.querySelectorAll('tr[data-idx]').forEach(tr => {
+                    tr.addEventListener('click', () => {
+                        tbody.querySelectorAll('tr.selected').forEach(x => x.classList.remove('selected'));
+                        tr.classList.add('selected');
+                        const idx = Number(tr.dataset.idx);
+                        const row = benchRowsCache[idx];
+                        $('lms-bench-detail').textContent = JSON.stringify(row, null, 2);
+                    });
+                });
+            } catch (e) {
+                tbody.innerHTML = `<tr><td colspan="6" class="lms-empty">error: ${e.message || e}</td></tr>`;
+            }
+        }
+
+        function activateSubtab(name) {
+            document.querySelectorAll('.lms-subtab-link').forEach(b => {
+                b.classList.toggle('active', b.dataset.subtab === name);
+            });
+            document.querySelectorAll('.lms-subtab').forEach(s => {
+                s.classList.toggle('active', s.id === `lms-${name}`);
+            });
+            if (name === 'console') refreshLoaded();
+            if (name === 'benchmarks') refreshBenchmarks();
+        }
+
+        function bind() {
+            document.querySelectorAll('.lms-subtab-link').forEach(b => {
+                b.addEventListener('click', () => activateSubtab(b.dataset.subtab));
+            });
+            const refreshBtn = $('lms-refresh-btn');
+            if (refreshBtn) refreshBtn.addEventListener('click', refreshLoaded);
+            const catRefresh = $('lms-catalog-refresh-btn');
+            if (catRefresh) catRefresh.addEventListener('click', refreshCatalog);
+            const benchRefresh = $('lms-bench-refresh-btn');
+            if (benchRefresh) benchRefresh.addEventListener('click', refreshBenchmarks);
+            const form = $('lms-load-form');
+            if (form) form.addEventListener('submit', handleLoadSubmit);
+        }
+
+        return {
+            activate() {
+                if (!activated) { bind(); activated = true; }
+                // Always refresh on open so reloads in LM Studio reflect immediately
+                refreshLoaded();
+                refreshBenchmarks();
+            },
+        };
+    })();
 
     loadConfig().then(() => {
         // Initialize menus after the sidebar has been populated
