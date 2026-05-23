@@ -585,7 +585,7 @@ output_router = OutputRouter(
 print("[GOV] OutputRouter initialized successfully")
 
 # Initialize Core Services Globally
-orchestrator = Orchestrator()
+orchestrator = Orchestrator(output_router=output_router)  # A2: Direct injection
 obsidian = ObsidianWriter()
 
 class PromptRequest(BaseModel):

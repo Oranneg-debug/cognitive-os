@@ -25,6 +25,9 @@ from src.sentry_router import SentryRouter
 from src.nft_agent import NFTAgent
 from src.document_processor import extract_text_from_pdf
 
+# Governance Foundation imports (A2, ARCH-2007E0A1)
+from src.output_router import OutputRouter
+
 
 # ==============================================================================
 # 🧠 COGNITIVE OS - EMBEDDER OPTIMIZATION HELPERS
@@ -116,10 +119,11 @@ def get_model_presets() -> list:
     return get_config().get("model_presets", [])
 
 class Orchestrator:
-    def __init__(self):
+    def __init__(self, output_router: OutputRouter = None):
         load_dotenv()
         self.sentry = SentryRouter()
         self.memory = MemoryFileManager()
+        self.output_router = output_router  # A2: Direct injection from api.py
         # Initialize config on startup
         get_config()
         
@@ -471,6 +475,12 @@ Output your final blueprint in the specified JSON format for your role.""",
         
         self.memory.complete_task(task_id)
         self._restore_default_state(progress_callback)
+        
+        # A2: Route the synthesis via OutputRouter if injected
+        if self.output_router is not None:
+            decision = self.output_router.route(report)
+            return self.output_router.apply(decision, report)
+        
         return report
 
     def _restore_default_state(self, progress_callback=None):
