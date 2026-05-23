@@ -1,0 +1,10 @@
+{
+  "rule_name": "handoff_archival",
+  "destination": "handoffs",
+  "workflow_phase": "beta",
+  "severity": "LOW",
+  "matched_markers": ["#handoff"],
+  "context": {
+    "severity": "LOW"
+  }
+}

@@ -67,13 +67,44 @@ class MemoryFileManager:
         return True
         
     def save_oversight_analysis(self, task_id: str, analysis: str):
-        """Save the oversight model's cross-reference analysis"""
-        file_path = os.path.join(self.active_path, f"{task_id}.json")
-        memory_data = self._read_json(file_path)
-        
-        if memory_data:
-            memory_data["oversight_analysis"] = {"raw_analysis": analysis}
-            self._write_json(file_path, memory_data)
+        """Save the oversight model's cross-reference analysis.
+
+        Hardened against the silent-drop bug: if the active task file is
+        missing (e.g. it was already archived by an outer error handler),
+        we now log it loudly AND also try the archived path so the
+        synthesis output is never thrown on the floor.
+        """
+        active_file = os.path.join(self.active_path, f"{task_id}.json")
+        memory_data = self._read_json(active_file)
+        target_file = active_file
+
+        if not memory_data:
+            # Fallback: the task may have been archived before this write
+            # landed (race between an upstream exception handler that ran
+            # complete_task → archive, and the synthesis turn finishing).
+            archived_root = self.archived_path
+            for root, _dirs, files in os.walk(archived_root):
+                candidate = os.path.join(root, f"{task_id}.json")
+                if os.path.isfile(candidate):
+                    memory_data = self._read_json(candidate)
+                    target_file = candidate
+                    print(
+                        f"[MEMORY] ⚠️ save_oversight_analysis: task {task_id} "
+                        f"was already archived — writing to {candidate}"
+                    )
+                    break
+
+        if not memory_data:
+            print(
+                f"[MEMORY] ❌ save_oversight_analysis: task {task_id} NOT FOUND "
+                f"in active/ or archived/ — synthesis output dropped "
+                f"(len={len(analysis) if isinstance(analysis, str) else 'n/a'})."
+            )
+            return False
+
+        memory_data["oversight_analysis"] = {"raw_analysis": analysis}
+        self._write_json(target_file, memory_data)
+        return True
             
     def get_all_opinions(self, task_id: str) -> List[Dict]:
         """Extract just the opinions list from a task"""
@@ -85,8 +116,18 @@ class MemoryFileManager:
 
     def get_task_data(self, task_id: str) -> Dict:
         """Retrieve the entire task JSON structure including opinions and oversight."""
-        file_path = os.path.join(self.active_path, f"{task_id}.json")
-        return self._read_json(file_path) or {}
+        # Try active first
+        active_file = os.path.join(self.active_path, f"{task_id}.json")
+        data = self._read_json(active_file)
+        if data:
+            return data
+            
+        # Try archived (search subfolders)
+        for root, dirs, files in os.walk(self.archived_path):
+            if f"{task_id}.json" in files:
+                return self._read_json(os.path.join(root, f"{task_id}.json")) or {}
+                
+        return {}
         
         
     def complete_task(self, task_id: str, output_path: str = None):

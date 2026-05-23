@@ -1,0 +1,85 @@
+# ════════════════════════════════════════════════════════════════════
+#  Routing Rules — ARCH-2007E0A1
+#  Schema: src/routing_rules_schema.py (Pydantic, validated at startup).
+#  Validation: rules are evaluated in declaration order; FIRST match wins.
+#              The catch-all (is_catchall: true) MUST be last (E1).
+# ════════════════════════════════════════════════════════════════════
+
+version: "1.0"
+
+rules:
+  # ---- 1. Boardroom proposals ----------------------------------------
+  - name: boardroom_proposal
+    destination: proposals
+    workflow_phase: beta
+    severity: HIGH
+    markers:
+      - pattern: "#boardroom"
+      - pattern: "ORCHESTRATED_BOARD_CHAIRMAN"
+
+  # ---- 2. Technical board proposals ----------------------------------
+  - name: technical_proposal
+    destination: proposals
+    workflow_phase: beta
+    severity: MEDIUM
+    markers:
+      - pattern: "#technical"
+      - pattern: "ORCHESTRATED_TECHNICAL_OVERSEER"
+
+  # ---- 3. Council decisions ------------------------------------------
+  - name: council_decision
+    destination: decisions
+    workflow_phase: beta
+    severity: HIGH
+    markers:
+      - pattern: "#decision"
+      - pattern: "boardroom_decision"
+
+  # ---- 4. Handoff archival -------------------------------------------
+  - name: handoff_archival
+    destination: handoffs
+    workflow_phase: beta
+    severity: LOW
+    markers:
+      - pattern: "#handoff"
+      - pattern: "BETA_HANDOFF"
+      - pattern: "ALPHA_HANDOFF"
+
+  # ---- 5. Analyst reports --------------------------------------------
+  - name: analyst_report
+    destination: reports
+    workflow_phase: backlog
+    severity: MEDIUM
+    markers:
+      - pattern: "#report"
+      - pattern: "#NLST"
+
+  # ---- 6. Archival sweep (already-finalized work) --------------------
+  - name: archival_sweep
+    destination: archives
+    workflow_phase: finalized
+    severity: LOW
+    markers:
+      - pattern: "#archived"
+      - pattern: "status:finalized"
+
+  # ---- 7. Failed routing — recoverable -------------------------------
+  # When OutputRouter.apply() catches an exception writing to the
+  # chosen destination, the content is rerouted here so it is NEVER
+  # silently dropped (E5).
+  - name: failed_routing
+    destination: failed_routings
+    workflow_phase: backlog
+    severity: HIGH
+    markers:
+      - pattern: "#routing_failure"
+
+  # ════════════════════════════════════════════════════════════════════
+  #  CATCH-ALL (E1) — MUST be last. Captures anything unmatched.
+  # ════════════════════════════════════════════════════════════════════
+  - name: decision_only
+    destination: decisions
+    workflow_phase: beta
+    severity: BACKLOG
+    is_catchall: true
+    markers: []

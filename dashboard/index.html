@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cognitive OS - Control Panel</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <aside class="sidebar">
+            <h1>Cognitive OS</h1>
+            <nav>
+                <h2>Roles</h2>
+                <ul id="roles-list">
+                    <!-- Roles will be dynamically inserted here -->
+                </ul>
+                <button id="add-role-btn" class="add-item-btn">+ Add New Role</button>
+                <button id="add-meeting-btn" class="add-item-btn">+ Create New Meeting Type</button>
+                
+                <h2>Base Models</h2>
+                <ul id="models-list">
+                    <!-- Models will be dynamically inserted here -->
+                </ul>
+            </nav>
+            <div class="test-panel">
+                <select id="orchestration-select" class="orchestration-select" title="Select orchestration pattern">
+                    <option value="auto">Auto (Sentry routes)</option>
+                    <option value="/simple">⚡ Simple — single pass</option>
+                    <option value="/standard">📋 Standard — single + preset</option>
+                    <option value="/vision">👁 Vision — image-aware single pass</option>
+                    <option value="/technical">🔧 Technical Meeting</option>
+                    <option value="/design">🎨 Design Meeting</option>
+                    <option value="/boardroom">🏛 Sequential Boardroom</option>
+                    <option value="/oracle">🔮 Oracle Council</option>
+                    <option value="/nft">💎 NFT Creation</option>
+                    <option value="/dev">🧪 Dev Team (creates proposal)</option>
+                </select>
+                <input type="text" id="test-prompt-input" placeholder="Prompt for the selected orchestration…">
+                <button id="test-btn" class="test-btn">Run Orchestration</button>
+            </div>
+        </aside>
+        <main class="main-content">
+            <header>
+                <div class="tabs">
+                    <button class="tab-link active" data-tab="home">Home</button>
+                    <button class="tab-link" data-tab="orchestrations">Orchestrations</button>
+                    <button class="tab-link" data-tab="config">Models & Roles</button>
+                    <button class="tab-link" data-tab="lmstudio">LM Studio</button>
+                    <button class="tab-link" data-tab="system">System</button>
+                </div>
+                <div class="config-actions" style="display: none;">
+                    <button id="save-btn" class="save-btn" disabled>Save Configuration</button>
+                    <button id="save-preset-btn" class="preset-btn" title="Save current config as preset">Save Preset</button>
+                    <button id="load-preset-btn-config" class="preset-btn" title="Load saved preset">Load Preset</button>
+                    <button id="push-obsidian-btn" class="preset-btn" title="Push to Obsidian vault">Push to Obsidian</button>
+                </div>
+            </header>
+
+            <div id="home" class="tab-content active">
+                <div class="home-page">
+                    <h1>🧠 Cognitive OS Control Center</h1>
+                    
+                    <!-- System Status Cards -->
+                    <div class="status-grid">
+                        <div class="status-card">
+                            <h3>System Load</h3>
+                            <div class="metrics">
+                                <div class="metric">
+                                    <label>CPU</label>
+                                    <div class="metric-bar">
+                                        <div class="metric-fill cpu-fill" id="cpu-bar"></div>
+                                        <span class="metric-text" id="cpu-text">--</span>
+                                    </div>
+                                </div>
+                                <div class="metric">
+                                    <label>Memory</label>
+                                    <div class="metric-bar">
+                                        <div class="metric-fill ram-fill" id="ram-bar"></div>
+                                        <span class="metric-text" id="ram-text">--</span>
+                                    </div>
+                                </div>
+                                <div class="metric">
+                                    <label>GPU</label>
+                                    <div class="metric-bar">
+                                        <div class="metric-fill gpu-fill" id="gpu-bar"></div>
+                                        <span class="metric-text" id="gpu-text">--</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="status-card">
+                            <h3>Model Status</h3>
+                            <div id="home-loaded-models" class="model-list">
+                                <p class="placeholder">Loading models...</p>
+                            </div>
+                        </div>
+                        
+                        <div class="status-card">
+                            <h3>Empty Seats</h3>
+                            <div id="home-empty-seats" class="empty-seats-list">
+                                <p class="placeholder">Checking roles...</p>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Quick Actions -->
+                    <div class="quick-actions">
+                        <h2>Quick Actions</h2>
+                        <div class="action-buttons">
+                            <button class="action-btn" onclick="switchToTab('orchestrations')">
+                                🎼 Run Orchestration
+                            </button>
+                            <button class="action-btn" onclick="switchToTab('config')">
+                                ⚙️ Configure Roles
+                            </button>
+                            <button class="action-btn" onclick="switchToTab('lmstudio')">
+                                🖥️ LM Studio Console
+                            </button>
+                            <button class="action-btn" id="load-preset-btn">
+                                📥 Load Obsidian Preset
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <!-- Recent Activity -->
+                    <div class="recent-activity">
+                        <h2>Recent Orchestrations</h2>
+                        <div id="home-recent" class="recent-list">
+                            <p class="placeholder">No recent activity</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="config" class="tab-content">
+                <div class="test-panel-container">
+                    <h1 id="config-title">Select a Role or Model to Configure</h1>
+                    <div class="test-panel-inline">
+                         <!-- Test panel removed from here as it lives in the sidebar -->
+                    </div>
+                </div>
+                <div id="config-panel" class="config-panel">
+                    <!-- Configuration form will be built here -->
+                    <p class="placeholder">Select an item from the sidebar to view and edit its configuration.</p>
+                </div>
+            </div>
+
+            <div id="orchestrations" class="tab-content">
+                <div class="orchestrations-page">
+                    <h1>🎼 Orchestrations</h1>
+                    <p class="orch-subtitle">
+                        Pick a pattern, type a prompt, watch the council run. Each card sends a prefixed
+                        request to <code>/process</code> — the Sentry Router still validates, but the
+                        prefix forces the pattern.
+                    </p>
+
+                    <div class="orch-layout">
+                        <div class="orch-main-column">
+                            <div class="orch-prompt-row">
+                                <textarea id="orch-prompt" rows="4"
+                                    placeholder="e.g. 'Design a memento-mori back piece that nods to bioluminescent jellyfish'"></textarea>
+                                <div class="orch-options">
+                                    <label>Compass weight
+                                        <select id="orch-compass">
+                                            <option value="">Default (per-role)</option>
+                                            <option value="MAXIMUM">MAXIMUM</option>
+                                            <option value="HIGH">HIGH</option>
+                                            <option value="MEDIUM">MEDIUM</option>
+                                            <option value="LOW">LOW</option>
+                                            <option value="IGNORE">IGNORE</option>
+                                        </select>
+                                    </label>
+                                </div>
+                            </div>
+
+                            <div id="orch-grid" class="orch-grid">
+                                <!-- Orchestration cards injected here -->
+                            </div>
+                        </div>
+
+                        <div class="orch-side-column">
+                            <!-- System Load Widget -->
+                            <div class="status-card">
+                                <h3>System Load</h3>
+                                <div class="metrics">
+                                    <div class="metric">
+                                        <label>CPU</label>
+                                        <div class="metric-bar">
+                                            <div class="metric-fill cpu-fill" id="orch-cpu-bar"></div>
+                                            <span class="metric-text" id="orch-cpu-text">--</span>
+                                        </div>
+                                    </div>
+                                    <div class="metric">
+                                        <label>Memory</label>
+                                        <div class="metric-bar">
+                                            <div class="metric-fill ram-fill" id="orch-ram-bar"></div>
+                                            <span class="metric-text" id="orch-ram-text">--</span>
+                                        </div>
+                                    </div>
+                                    <div class="metric">
+                                        <label>GPU 1</label>
+                                        <div class="metric-bar">
+                                            <div class="metric-fill gpu-fill" id="orch-gpu-bar"></div>
+                                            <span class="metric-text" id="orch-gpu-text">--</span>
+                                        </div>
+                                    </div>
+                                    <div class="metric">
+                                        <label>VRAM 1</label>
+                                        <div class="metric-bar">
+                                            <div class="metric-fill vram-fill" id="orch-vram1-bar"></div>
+                                            <span class="metric-text" id="orch-vram1-text">--</span>
+                                        </div>
+                                    </div>
+                                    <div class="metric">
+                                        <label>GPU 2</label>
+                                        <div class="metric-bar">
+                                            <div class="metric-fill gpu-fill" id="orch-gpu2-bar"></div>
+                                            <span class="metric-text" id="orch-gpu2-text">--</span>
+                                        </div>
+                                    </div>
+                                    <div class="metric">
+                                        <label>VRAM 2</label>
+                                        <div class="metric-bar">
+                                            <div class="metric-fill vram-fill" id="orch-vram2-bar"></div>
+                                            <span class="metric-text" id="orch-vram2-text">--</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Output Log -->
+                            <div id="orch-output" class="orch-output">
+                                <div class="orch-output-header">
+                                    <h3>Output</h3>
+                                    <div class="orch-log-controls">
+                                        <button id="clear-orch-log" class="log-btn" title="Clear current log">Clear Log</button>
+                                        <button id="save-orch-log" class="log-btn" title="Save log for analysis">Save Log</button>
+                                    </div>
+                                </div>
+                                <div class="orch-meta"></div>
+                                <pre class="orch-response"><em>No run yet.</em></pre>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="lmstudio" class="tab-content">
+                <div class="lms-page">
+                    <header class="lms-header">
+                        <h1>LM Studio</h1>
+                        <div class="lms-subtabs">
+                            <button class="lms-subtab-link active" data-subtab="console">Console</button>
+                            <button class="lms-subtab-link" data-subtab="benchmarks">Benchmarks</button>
+                        </div>
+                    </header>
+
+                    <!-- ===== CONSOLE ===== -->
+                    <section id="lms-console" class="lms-subtab active">
+                        <div class="lms-grid">
+                            <!-- Loaded models readout -->
+                            <article class="lms-card lms-loaded">
+                                <header class="lms-card-head">
+                                    <span class="lms-card-title">// loaded models</span>
+                                    <button id="lms-refresh-btn" class="lms-link-btn"
+                                        title="Refresh loaded list">↻ refresh</button>
+                                </header>
+                                <div class="lms-table-wrap">
+                                    <table class="lms-table" id="lms-loaded-table">
+                                        <thead>
+                                            <tr>
+                                                <th>identifier</th>
+                                                <th>model_key</th>
+                                                <th>ctx</th>
+                                                <th></th>
+                                            </tr>
+                                        </thead>
+                                        <tbody><tr><td colspan="4" class="lms-empty">loading…</td></tr></tbody>
+                                    </table>
+                                </div>
+                                
+                                <!-- Model Defaults & Capabilities Window -->
+                                <div class="lms-model-defaults">
+                                    <h4>Model Defaults & Capabilities</h4>
+                                    <div id="model-defaults-content" class="model-defaults-grid">
+                                        <p class="placeholder">Select a loaded model to view defaults</p>
+                                    </div>
+                                </div>
+                            </article>
+
+                            <!-- Load form -->
+                            <article class="lms-card lms-loadform">
+                                <header class="lms-card-head">
+                                    <span class="lms-card-title">// load / reload</span>
+                                </header>
+                                <form id="lms-load-form" class="lms-form">
+                                    <label class="lms-field lms-field-wide">
+                                        <span>model_key</span>
+                                        <input list="lms-catalog" name="model_key" required
+                                            placeholder="e.g. hermes-4.3-36b-heretic-i1">
+                                        <datalist id="lms-catalog"></datalist>
+                                    </label>
+
+                                    <label class="lms-field">
+                                        <span>identifier</span>
+                                        <input name="identifier" placeholder="optional override">
+                                    </label>
+
+                                    <label class="lms-field">
+                                        <span>context_length</span>
+                                        <input name="context_length" type="number" min="512"
+                                            placeholder="65536">
+                                    </label>
+
+                                    <label class="lms-field">
+                                        <span>n_parallel</span>
+                                        <input name="n_parallel" type="number" min="1" max="16"
+                                            placeholder="1">
+                                    </label>
+
+                                    <label class="lms-field">
+                                        <span>flash_attention</span>
+                                        <select name="flash_attention">
+                                            <option value="">— inherit —</option>
+                                            <option value="true">true</option>
+                                            <option value="false">false</option>
+                                        </select>
+                                    </label>
+
+                                    <label class="lms-field"
+                                        title="Accepts: 'max' (all GPU), 'off' (CPU-only), or a number 0.0–1.0 (fraction on GPU). Not the llama.cpp -1 convention.">
+                                        <span>gpu_offload_ratio</span>
+                                        <input name="gpu_offload_ratio" type="text"
+                                            pattern="^(max|off|0(\.\d+)?|1(\.0+)?)$"
+                                            placeholder="max | off | 0.0–1.0">
+                                    </label>
+
+                                    <label class="lms-field">
+                                        <span>cache_type_k</span>
+                                        <select name="cache_type_k">
+                                            <option value="">— inherit —</option>
+                                            <option value="f16">f16</option>
+                                            <option value="q8_0">q8_0</option>
+                                            <option value="q4_0">q4_0</option>
+                                        </select>
+                                    </label>
+
+                                    <label class="lms-field">
+                                        <span>cache_type_v</span>
+                                        <select name="cache_type_v">
+                                            <option value="">— inherit —</option>
+                                            <option value="f16">f16</option>
+                                            <option value="q8_0">q8_0</option>
+                                            <option value="q4_0">q4_0</option>
+                                        </select>
+                                    </label>
+
+                                    <label class="lms-field">
+                                        <span>ttl (seconds)</span>
+                                        <input name="ttl" type="number" min="0" placeholder="∞">
+                                    </label>
+
+                                    <label class="lms-field lms-field-check">
+                                        <input type="checkbox" name="force_reload">
+                                        <span>force_reload (evict existing)</span>
+                                    </label>
+
+                                    <!-- Sampling defaults: NOT load-time, but persisted as
+                                         per-model defaults so inference uses them by default. -->
+                                    <fieldset class="lms-fieldset">
+                                        <legend>sampling defaults <span class="lms-hint">— inference, not VRAM</span></legend>
+                                        <label class="lms-field">
+                                            <span>temperature</span>
+                                            <input name="temperature" type="number"
+                                                step="0.01" min="0" max="2" placeholder="0.7">
+                                        </label>
+                                        <label class="lms-field">
+                                            <span>top_p</span>
+                                            <input name="top_p" type="number"
+                                                step="0.01" min="0" max="1" placeholder="0.95">
+                                        </label>
+                                        <label class="lms-field">
+                                            <span>top_k</span>
+                                            <input name="top_k" type="number"
+                                                min="0" max="200" placeholder="40">
+                                        </label>
+                                        <label class="lms-field">
+                                            <span>min_p</span>
+                                            <input name="min_p" type="number"
+                                                step="0.01" min="0" max="1" placeholder="0.05">
+                                        </label>
+                                        <label class="lms-field">
+                                            <span>repeat_penalty</span>
+                                            <input name="repeat_penalty" type="number"
+                                                step="0.01" min="0" max="2" placeholder="1.1">
+                                        </label>
+                                        <label class="lms-field">
+                                            <span>max_tokens</span>
+                                            <input name="max_tokens" type="number"
+                                                min="1" max="65536" placeholder="8192">
+                                        </label>
+                                    </fieldset>
+
+                                    <div class="lms-form-actions">
+                                        <button type="submit" class="lms-primary-btn"
+                                            id="lms-load-submit">load</button>
+                                        <button type="button" class="lms-link-btn"
+                                            id="lms-catalog-refresh-btn">↻ refresh catalog</button>
+                                    </div>
+                                </form>
+                            </article>
+
+                            <!-- Result panel -->
+                            <article class="lms-card lms-result">
+                                <header class="lms-card-head">
+                                    <span class="lms-card-title">// last action</span>
+                                </header>
+                                <pre id="lms-result-panel" class="lms-result-panel"><em>no requests yet.</em></pre>
+                            </article>
+
+                            <!-- LM Studio runtime log tail -->
+                            <article class="lms-card lms-logs">
+                                <header class="lms-card-head">
+                                    <span class="lms-card-title">// lm studio log</span>
+                                    <span class="lms-card-controls">
+                                        <input type="text" id="lms-log-filter"
+                                            class="lms-log-filter"
+                                            placeholder="filter (e.g. LlamaV4)"
+                                            title="Case-insensitive substring filter on each line">
+                                        <label class="lms-log-toggle"
+                                            title="Auto-refresh every 2s">
+                                            <input type="checkbox" id="lms-log-follow" checked>
+                                            <span>follow</span>
+                                        </label>
+                                        <button id="lms-log-refresh-btn" class="lms-link-btn"
+                                            title="Refresh now">↻</button>
+                                    </span>
+                                </header>
+                                <pre id="lms-log-panel" class="lms-log-panel"><em>idle.</em></pre>
+                            </article>
+                        </div>
+                    </section>
+
+                    <!-- ===== BENCHMARKS ===== -->
+                    <section id="lms-benchmarks" class="lms-subtab">
+                        <div class="lms-bench-grid">
+                            <article class="lms-card">
+                                <header class="lms-card-head">
+                                    <span class="lms-card-title">// bench history</span>
+                                    <button id="lms-bench-refresh-btn" class="lms-link-btn"
+                                        title="Reload bench JSONL">↻ reload</button>
+                                </header>
+                                <div class="lms-table-wrap">
+                                    <table class="lms-table" id="lms-bench-table">
+                                        <thead>
+                                            <tr>
+                                                <th>timestamp</th>
+                                                <th>model_key</th>
+                                                <th>ctx</th>
+                                                <th>client tps</th>
+                                                <th>server eval</th>
+                                                <th>pp</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody><tr><td colspan="6" class="lms-empty">loading…</td></tr></tbody>
+                                    </table>
+                                </div>
+                            </article>
+
+                            <article class="lms-card">
+                                <header class="lms-card-head">
+                                    <span class="lms-card-title">// detail</span>
+                                </header>
+                                <pre id="lms-bench-detail" class="lms-result-panel"><em>select a row.</em></pre>
+                            </article>
+                        </div>
+                    </section>
+                </div>
+            </div>
+
+            <div id="system" class="tab-content">
+                <div class="system-page">
+                    <header class="system-header">
+                        <h1>System Architecture</h1>
+                        <div class="system-subtabs">
+                            <button class="system-subtab-link active" data-subtab="structure">Structure</button>
+                            <button class="system-subtab-link" data-subtab="flow">Request Flow</button>
+                            <button class="system-subtab-link" data-subtab="kanban">Kanban Workflow</button>
+                        </div>
+                    </header>
+                    
+                    <section id="system-structure" class="system-subtab active">
+                        <div class="placeholder">Loading System Structure...</div>
+                    </section>
+                    
+                    <section id="system-flow" class="system-subtab">
+                        <div class="placeholder">Loading Request Flow...</div>
+                    </section>
+                    
+                    <section id="system-kanban" class="system-subtab">
+                        <div class="placeholder">Loading Kanban Workflow...</div>
+                    </section>
+                </div>
+            </div>
+        </main>
+    </div>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <script>mermaid.initialize({ startOnLoad: false });</script>
+    <script src="script.js"></script>
+</body>
+</html>

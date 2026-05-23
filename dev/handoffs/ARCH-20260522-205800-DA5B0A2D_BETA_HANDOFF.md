@@ -1,0 +1,261 @@
+---
+proposal_id: ARCH-20260522-205800-DA5B0A2D
+phase: beta
+status: in_progress
+created: 2026-05-23 13:48:24
+handoff_type: beta_testing
+related_proposal: "[[ARCH-20260522-205800-DA5B0A2D_PROPOSAL]]"
+kanban_card_id: "^[ARCH-20260522205800-DA5B0A]"
+source_note: ""
+next_phase: Alpha Polish
+tasks_completed: 0
+tasks_total: 1
+vault_kanban: "1. P - Seedlings/Dev-KanBan.md"
+---
+
+# 🧪 Beta Testing Handoff — ARCH-20260522-205800-DA5B0A2D
+
+> **Generated**: 2026-05-23 13:48:24  
+> **Proposal**: [[ARCH-20260522-205800-DA5B0A2D_PROPOSAL]]  
+> **Phase**: Beta Testing  
+> **Status**: 🔧 In Progress — take this document to VS Code
+
+---
+
+## 🤖 Agent Context
+
+> *This block is for AI agents (Cline/Claude in VS Code). It is not displayed in Obsidian reading mode.*
+
+When a user references this handoff (e.g. *"work on ARCH-20260522-205800-DA5B0A2D"*):
+
+1. **Find the proposal** → `cognitive-os/dev/proposals/ARCH-20260522-205800-DA5B0A2D_PROPOSAL.md`
+2. **Work through the tasks** in `## 🔧 Implementation Tasks` below, ticking each `- [ ]` to `- [x]` as completed
+3. **When all tasks are ticked** → update this file's frontmatter: `status: complete`, `tasks_completed: <n>`
+4. **Update the proposal** → change `## 🧪 Beta Testing` status line to `✅ Complete`
+5. **Update the Kanban card** at `vault_kanban` above → change `  - status: 🔍 Review` to `  - status: ✅ Ready for Alpha Polish`
+6. **Tell the user** to drag the card to the `Alpha Polish` column to trigger the next council automatically
+
+Backlinks to maintain:
+- Proposal: [[ARCH-20260522-205800-DA5B0A2D_PROPOSAL]]
+- Source note: see `source_note` in frontmatter above (if set)
+- Kanban card ID: see `kanban_card_id` in frontmatter above
+
+---
+
+## 📋 Executive Summary
+
+**Final Decision**: (no explicit final_decision; substance is APPROVAL per audit_report)
+
+**Audit Report**:
+
+_(no audit_report)_
+
+---
+
+## ⚠️ Difficulties & Constraints
+
+**Risk Register (from technical critic)**:
+
+- **high**: Two writers on `Dev-KanBan.md` could lead to data inconsistency and corruption.
+- **high**: Reading markdown post-migration as source of truth would violate the single source of truth principle.
+- **medium**: Silent gate failures could lead to a degraded user experience and potential data loss.
+- **high**: Anonymous approvals or missing approver field would compromise the integrity of the approval process.
+- **medium**: Introducing React/Vue/Svelte for Kanban UI could lead to web framework creep and inconsistency in the dashboard interface.
+- **high**: Bypassing `kanban_store` in `workflow_engine` would violate the single source of truth principle and potentially corrupt the database.
+
+---
+
+## 🔧 Implementation Tasks
+
+> Tick each item off as you complete it in VS Code.
+> Update `tasks_completed` in the frontmatter as you go.
+
+- [ ] See full council report below for implementation guidance
+
+---
+
+## 🧠 Technical Council Deliberation
+
+<details>
+<summary>Full council report (click to expand)</summary>
+
+**Task ID**: `task_20260523_012532_6dfbdb27`
+**Pattern**: `ORCHESTRATED_TECHNICAL_OVERSEER`
+**Completed**: 2026-05-23T01:36:06.459045
+
+### Chairman / Overseer Synthesis
+
+### Per-Role Opinions
+
+#### moderator — `ministral-3-3b-instruct-2512` — 2026-05-23T01:25:40.702409
+
+_[role failed: Expecting property name enclosed in double quotes: line 1 column 2 (char 1)]_
+
+#### technical_specialist — `qwen3.6-27b-heretic-uncensored-finetune-neo-code-di-imatrix-max` — 2026-05-23T01:29:35.394178
+
+**technical_analysis**: **1. Summary**
+Migrates Kanban state from a fragile, file-polling markdown system to a centralized SQLite store accessed via FastAPI. Enforces unidirectional flow: Dashboard → API → SQLite → Renderer → Vault mirror. Eliminates race conditions, regex parsing overhead, and dual-writer conflicts while cleanly separating dev workflow (dashboard/API) from user workspace (Obsidian). Aligns with mandates M1–M10 and hardening H1–H7.
+
+**2. Difficulties & Constraints**
+- Async/SQLite integration: Mandate M9 (`asyncio.to_thread`) must be paired with a controlled connection pool to avoid thread starvation or stale connections. WAL mode (H1) is mandatory for concurrency; improper PRAGMA handling will degrade performance under load.
+- Migration integrity: Transferring 55+ cards requires deterministic conflict resolution (H3). Frontmatter vs markdown discrepancies must be logged, not silently overwritten. Checksum validation (H6) adds complexity but is necessary to guarantee zero data loss.
+- UI reliability: Vanilla JS drag-drop with strict timeout/snap-back (H5) demands precise event cleanup. Network latency or API hangs can leave cards in limbo if rollback logic isn’t bulletproof.
+- Single-writer enforcement: M1/M4 require absolute isolation of `Dev-KanBan.md`. Any stray script writing to it breaks the contract. CI grep is good, but runtime file locking or atomic write guards are safer.
+- Gate UX: M7 bans silent failures. API must return structured gate results; UI must parse and render them without blocking interactions or causing layout thrash.
+
+**3. Implementation Tasks**
+1. Implement `kanban_store.py`: WAL mode, connection pool, async-safe CRUD, schema (drop `state_hash` per H2), transactional backups with cleanup.
+2. Build `kanban_renderer.py`: Pure render function, atomic write via tmp+rename, explicit header comment.
+3. Extend FastAPI: Board sync, transition endpoint with gate validation, rollback route, state history; enforce M8/M9/M7.
+4. Develop Kanban UI: Vanilla JS drag-drop, timeout/snap-back (H5), gate-fail modal, substatus dropdown, history drawer.
+5. Slim `kanban_processor.py`: Strip polling/regex, expose thin facade delegating to `kanban_store`.
+6. Refactor `sync_proposals_to_kanban.py`: Convert to SQLite backfill tool with dry-run support.
+7. Write migration script: Idempotent, checksum validation (H6), precedence logic (H3), backup routine, divergence logging.
+8. Update Obsidian plugin: Remove dev-triggers (M10), add "Open Dashboard Kanban" command (H7).
+
+**4. Technical Recommendations**
+- Use a dedicated `ThreadPoolExecutor` for SQLite calls instead of raw `asyncio.to_thread` to control concurrency and avoid event loop contention.
+- Implement optimistic locking via `updated_ts`: reject transitions if the submitted timestamp is older than DB, preventing stale dashboard actions.
+- Add runtime guard in renderer: verify file hasn’t been externally modified before overwriting; log divergence if mtime mismatch occurs.
+- Structure gate responses as JSON arrays of failed checks; UI should map them to a checklist modal without custom parsing logic.
+- Introduce health endpoint (`GET /api/health/db`) exposing WAL status, connection pool size, and last backup timestamp for observability.
+
+**actionable_steps**: [
+  "Implement kanban_store.py with WAL mode, connection pooling, async-safe wrappers, and transactional backup/cleanup logic.",
+  "Build kanban_renderer.py with pure render function and atomic filesystem write (tmp + os.replace).",
+  "Extend FastAPI routes for board sync, transitions, rollback, and state history; enforce M7/M8/M9 with structured responses.",
+  "Develop vanilla JS Kanban UI with drag-drop, timeout/snap-back handling, gate-fail modal, substatus controls, and history drawer.",
+  "Refactor kanban_processor.py into a thin facade; remove all polling/regex/parsing code.",
+  "Convert sync_proposals_to_kanban.py to a SQLite backfill tool with dry-run support.",
+  "Write idempotent migration script with checksum validation, precedence logic (H3), and divergence logging.",
+  "Update Obsidian plugin: strip dev-triggers per M10; add 'Open Dashboard Kanban' command per H7."
+]
+
+**veto_points**: [
+  "Two writers on Dev-KanBan.md",
+  "Reading markdown post-migration as source of truth",
+  "Silent gate failures (no modal/structured error)",
+  "Anonymous approvals or missing approver field",
+  "Introducing React/Vue/Svelte for Kanban UI",
+  "Bypassing kanban_store in workflow_engine"
+]
+
+**next_step**: Finalize migration script with synthetic test cases and implement optimistic concurrency control (updated_ts validation) before beta rollout.
+
+#### brand_guard_technical_specialist — `gemma-4-e4b-uncensored-hauhaucs-aggressive` — 2026-05-23T01:30:27.965119
+
+**reasoning**: The output is exceptionally thorough. It clearly maps technical implementation details to specific mandates (M1-M10, H1-H7), identifies critical risks (race conditions, silent failures), and provides a highly actionable roadmap. The veto points are well-chosen as high-risk areas that could derail the project.
+
+**veto_points**: [
+  "Two writers on Dev-KanBan.md",
+  "Reading markdown post-migration as source of truth",
+  "Silent gate failures (no modal/structured error)",
+  "Anonymous approvals or missing approver field",
+  "Introducing React/Vue/Svelte for Kanban UI",
+  "Bypassing kanban_store in workflow_engine"
+]
+
+**approved**: True
+
+#### technical_creative — `hermes-4.3-36b-heretic-i1` — 2026-05-23T01:31:51.340310
+
+**next_step**: Implement connection pooling with ThreadPoolExecutor in kanban_store.py; build gate-error response schema for API; finalize migration test suite with synthetic frontmatter/markdown conflicts.
+
+#### brand_guard_technical_creative — `gemma-4-e4b-uncensored-hauhaucs-aggressive` — 2026-05-23T01:32:28.050879
+
+**reasoning**: The audit is comprehensive, highly detailed, and demonstrates a deep understanding of the technical scope. The structure (Summary, Difficulties, Tasks, Recommendations) is logical. The integration of specific mandates (M1, H3, M7, etc.) throughout all sections ensures strong narrative coherence and strategic alignment with project constraints. The recommendations are actionable and reinforce the stated goals.
+
+**veto_points**: [
+  "None. This output is exceptionally well-structured and aligned."
+]
+
+**approved**: True
+
+#### technical_critic — `deepseek-r1-distill-qwen-32b-uncensored` — 2026-05-23T01:35:15.442201
+
+**critical_feedback**: The proposal is comprehensive and well-thought-out, but there are several critical issues that need to be addressed:
+1. The use of two writers on `Dev-KanBan.md` could lead to data inconsistency and corruption. This must be strictly enforced through CI checks or runtime guards.
+2. Reading markdown post-migration as source of truth would violate the single source of truth principle. All state changes must originate from the dashboard API.
+3. Silent gate failures could lead to a degraded user experience and potential data loss. The dashboard must surface gate failures through structured responses and modal dialogs.
+4. Anonymous approvals or missing approver field would compromise the integrity of the approval process. The API must validate the `approver` field and reject anonymous moves.
+5. Introducing React/Vue/Svelte for Kanban UI could lead to web framework creep and inconsistency in the dashboard interface. The proposal correctly mandates vanilla JS + HTML5 drag events, which should be strictly enforced.
+6. Bypassing `kanban_store` in `workflow_engine` would violate the single source of truth principle and potentially corrupt the database. All state changes must go through `kanban_store`.
+
+**veto_points**: [
+  {
+    "type": "technical",
+    "risk_level": "high",
+    "description": "Two writers on `Dev-KanBan.md` could lead to data inconsistency and corruption."
+  },
+  {
+    "type": "technical",
+    "risk_level": "high",
+    "description": "Reading markdown post-migration as source of truth would violate the single source of truth principle."
+  },
+  {
+    "type": "technical",
+    "risk_level": "medium",
+    "description": "Silent gate failures could lead to a degraded user experience and potential data loss."
+  },
+  {
+    "type": "technical",
+    "risk_level": "high",
+    "description": "Anonymous approvals or missing approver field would compromise the integrity of the approval process."
+  },
+  {
+    "type": "technical",
+    "risk_level": "medium",
+    "description": "Introducing React/Vue/Svelte for Kanban UI could lead to web framework creep and inconsistency in the dashboard interface."
+  },
+  {
+    "type": "technical",
+    "risk_level": "high",
+    "description": "Bypassing `kanban_store` in `workflow_engine` would violate the single source of truth principle and potentially corrupt the database."
+  }
+]
+
+**next_step**: Implement connection pooling with `ThreadPoolExecutor` in `kanban_store.py`, build gate-error response schema for API, and finalize migration test suite with synthetic frontmatter/markdown conflicts.
+
+#### brand_guard_technical_critic — `gemma-4-e4b-uncensored-hauhaucs-aggressive` — 2026-05-23T01:35:58.745720
+
+**reasoning**: The audit output is highly detailed, clearly structured, and directly addresses potential risks against established architectural principles (like Single Source of Truth). The feedback is actionable, and the next steps are concrete. It demonstrates strong brand integrity enforcement.
+
+**veto_points**: [
+  {
+    "type": "clarity",
+    "risk_level": "low",
+    "description": "The structure uses 'critical_feedback' which contains a summary followed by numbered points mirroring the vetoes. While redundant, this reinforces the message and is not a true violation."
+  }
+]
+
+**approved**: True
+
+
+</details>
+
+---
+
+## 📝 Developer Notes
+
+> *Fill in as you work through the tasks above.*
+
+<!-- Add your implementation notes, decisions, and blockers here -->
+
+---
+
+## ✅ Completion Gate
+
+Before moving the Kanban card to **Alpha Polish**, confirm:
+
+- [ ] All implementation tasks above are ticked
+- [ ] Core functionality works end-to-end
+- [ ] No critical bugs remain
+- [ ] Basic manual testing passed
+- [ ] Frontmatter `status` updated to `complete`
+- [ ] Proposal `## 🧪 Beta Testing` section updated to `✅ Complete`
+
+---
+
+*Handoff generated by Cognitive OS Technical Council*  
+*Card stays in **Beta Testing** until all tasks above are complete.*  
+*Only then move the card to **Alpha Polish**.*

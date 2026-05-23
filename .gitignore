@@ -17,6 +17,12 @@ mock_vault/
 memory/
 *.json
 
+# Test fixtures MUST be tracked even though *.json is globally ignored.
+# These are golden outputs for the Phase 2 routing regression suite (E2).
+!tests/routing/*.json
+!tests/**/golden_*.json
+!tests/**/fixture_*.json
+
 # OS generated files
 .DS_Store
 .DS_Store?
@@ -25,3 +31,7 @@ memory/
 .Trashes
 ehthumbs.db
 Thumbs.db
+
+# Logs and scratch
+*.log
+scratch/

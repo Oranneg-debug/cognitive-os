@@ -13,10 +13,12 @@ class SentryRouter:
         self.patterns = {
             "SIMPLE": "Single model pass, Reflex Layer",
             "STANDARD": "Single model + preset, Operational Brain",
-            "SMALL_COUNCIL": "Draft (Specialist) → Refine (Critic) → Synthesize pipeline",
-            "DESIGN_COUNCIL": "Draft (Creative) → Refine (Critic) → Synthesize + Image Prompts",
+            "TECHNICAL_MEETING": "Draft (Specialist) → Expand (Creative) → Refine (Critic) → Synthesize pipeline",
+            "DESIGN_MEETING": "Draft (junior_designer) → Expand (creative_expansionist) → Refine (Critic) → Synthesize + Image Prompts (senior_designer)",
             "SEQUENTIAL_BOARDROOM": "Local: Independent opinions + memory file",
-            "ONLINE_BOARDROOM": "Frontier models via API (Parallel)"
+            "ONLINE_BOARDROOM": "Frontier models via API (Parallel)",
+            "NFT_CREATION": "NFT Metadata generation + Minting simulation",
+            "DEVELOPMENT_LIFECYCLE": "Dev proposal → Beta review → Alpha polish → Finalize release"
         }
         
     def classify_request(self, user_input: str) -> Dict[str, any]:
@@ -25,7 +27,7 @@ class SentryRouter:
         is_online = self._check_connectivity()
         available_vram_gb = self._get_available_vram()
         
-        pattern = self._select_pattern(complexity, domain, is_online)
+        pattern = self._select_pattern(complexity, domain, is_online, user_input)
         
         return {
             "pattern": pattern,
@@ -40,7 +42,7 @@ class SentryRouter:
         low_keywords = ["tag", "summary", "extract", "convert", "format", "clean", "organize", "list", "count"]
         
         # Domains
-        creative_keywords = ["design", "idea", "creative", "tattoo", "brainstorm", "concept", "story", "poem", "art", "visualize"]
+        creative_keywords = ["design", "idea", "creative", "tattoo", "brainstorm", "concept", "story", "poem", "art", "visualize", "nft", "mint", "crypto"]
         technical_keywords = ["code", "script", "refactor", "bug", "technical", "implement", "function", "optimize", "system", "architecture"]
         strategic_keywords = ["strategy", "plan", "analysis", "decision", "framework", "roadmap", "business", "life systems", "future", "boardroom", "comprehensive"]
         
@@ -66,21 +68,31 @@ class SentryRouter:
         else:
             complexity = "low"
             
-        # Overrides based on explicit user requests (Slash commands for Obsidian)
-        if "/design" in text_lower or "/creative" in text_lower or "design council" in text_lower or "creative council" in text_lower:
+        text_lower_stripped = text_lower.strip()
+        # Overrides based on explicit user requests (Slash/Hash commands for Obsidian)
+        if text_lower_stripped.startswith("/design") or text_lower_stripped.startswith("#design") or text_lower_stripped.startswith("/creative") or text_lower_stripped.startswith("design meeting") or text_lower_stripped.startswith("design council") or text_lower_stripped.startswith("creative council"):
             complexity = "high"
             domain = "creative"
-        elif "/technical" in text_lower or "/small" in text_lower or "small council" in text_lower or "technical council" in text_lower:
+        elif text_lower_stripped.startswith("/technical") or text_lower_stripped.startswith("#technical") or text_lower_stripped.startswith("/small") or text_lower_stripped.startswith("technical meeting") or text_lower_stripped.startswith("small council") or text_lower_stripped.startswith("technical council"):
             complexity = "high"
             domain = "technical"
-        elif "/boardroom" in text_lower or "/strategic" in text_lower or "boardroom" in text_lower:
+        elif text_lower_stripped.startswith("/oracle") or text_lower_stripped.startswith("#oracle"):
+            complexity = "high"
+            domain = "oracle"
+        elif text_lower_stripped.startswith("/boardroom") or text_lower_stripped.startswith("#boardroom") or text_lower_stripped.startswith("/strategic") or text_lower_stripped.startswith("boardroom"):
             complexity = "high"
             domain = "strategic"
-        elif "/simple" in text_lower:
+        elif text_lower_stripped.startswith("/simple") or text_lower_stripped.startswith("#simple") or text_lower_stripped.startswith("/vision") or text_lower_stripped.startswith("#vision"):
             complexity = "low"
             domain = "technical"
-        elif "/standard" in text_lower:
+        elif text_lower_stripped.startswith("/standard") or text_lower_stripped.startswith("#standard"):
             complexity = "medium"
+            domain = "technical"
+        elif text_lower_stripped.startswith("/nft") or text_lower_stripped.startswith("#nft") or text_lower_stripped.startswith("nft creation"):
+            complexity = "high"
+            domain = "creative"
+        elif text_lower_stripped.startswith("/dev") or text_lower_stripped.startswith("#dev") or text_lower_stripped.startswith("development lifecycle") or text_lower_stripped.startswith("dev route"):
+            complexity = "high"
             domain = "technical"
             
         return complexity, domain
@@ -110,8 +122,24 @@ class SentryRouter:
             return 48.0
         except Exception:
             return 48.0 # Fallback
+        
+    def _select_pattern(self, complexity: str, domain: str, is_online: bool, user_input: str = "") -> str:
+        text_lower = user_input.lower().strip()
+
+        # Explicitly check for command prefixes first
+        if text_lower.startswith("#boardroom") or text_lower.startswith("/boardroom"):
+            return "SEQUENTIAL_BOARDROOM"
+        if text_lower.startswith("#design") or text_lower.startswith("/design"):
+            return "DESIGN_MEETING"
+        if text_lower.startswith("#technical") or text_lower.startswith("/technical"):
+            return "TECHNICAL_MEETING"
+        if text_lower.startswith("#oracle") or text_lower.startswith("/oracle"):
+            return "ORACLE_COUNCIL"
+        if text_lower.startswith("#dev") or text_lower.startswith("/dev"):
+            return "DEVELOPMENT_LIFECYCLE"
+        if text_lower.startswith("#nft") or text_lower.startswith("/nft") or text_lower.startswith("nft creation"):
+            return "NFT_CREATION"
             
-    def _select_pattern(self, complexity: str, domain: str, is_online: bool) -> str:
         if complexity == "low":
             return "SIMPLE"
         elif complexity == "medium":
@@ -123,6 +151,6 @@ class SentryRouter:
                 if domain == "strategic":
                     return "SEQUENTIAL_BOARDROOM"
                 elif domain == "creative":
-                    return "DESIGN_COUNCIL"
+                    return "DESIGN_MEETING"
                 else:
-                    return "SMALL_COUNCIL"
+                    return "TECHNICAL_MEETING"

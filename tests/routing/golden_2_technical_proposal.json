@@ -1,0 +1,10 @@
+{
+  "rule_name": "technical_proposal",
+  "destination": "proposals",
+  "workflow_phase": "beta",
+  "severity": "MEDIUM",
+  "matched_markers": ["#technical"],
+  "context": {
+    "severity": "MEDIUM"
+  }
+}

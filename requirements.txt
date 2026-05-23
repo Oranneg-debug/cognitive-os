@@ -2,7 +2,23 @@ openai>=1.0.0
 psutil>=5.9.0
 requests>=2.31.0
 python-dotenv>=1.0.0
+google-genai>=0.1.0
+
+# Telegram Enhancements
+youtube-transcript-api>=0.6.1
 
 fastapi>=0.100.0
 uvicorn>=0.23.0
 python-telegram-bot>=20.3
+# LM Studio lifecycle SDK — DEV-20260521-001000-B5D5C0DE
+# Pinned to 1.5.0 (verified 2026-05-21 against LM Studio runtime on dev machine).
+# IMPORTANT: bare `lmstudio.Client()` does not auto-resolve the local host on
+# this version — use module-level convenience helpers (lms.list_downloaded_models,
+# lms.llm, etc.) or pre-configure the host. Bump with care, the WebSocket
+# protocol shifts between minor versions.
+lmstudio==1.5.0
+
+# JSON-schema validation for incoming load configs (Pydantic 2.x already
+# installed transitively on the dev machine; declared here so fresh installs
+# pick it up explicitly).
+pydantic>=2.0

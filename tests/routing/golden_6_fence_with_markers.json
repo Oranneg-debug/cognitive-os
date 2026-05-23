@@ -1,0 +1,10 @@
+{
+  "rule_name": "boardroom_proposal",
+  "destination": "proposals",
+  "workflow_phase": "beta",
+  "severity": "HIGH",
+  "matched_markers": ["#boardroom"],
+  "context": {
+    "severity": "HIGH"
+  }
+}
