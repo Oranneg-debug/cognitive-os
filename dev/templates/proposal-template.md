@@ -1,64 +1,79 @@
-# [[YYYY-MM-DD]] Proposal: [Brief Title]
+---
+status: pending
+phase: backlog
+origin: "<ORIGIN>"
+prefix: "<PREFIX>"
+---
 
-**Date**: YYYY-MM-DD  
-**Author**: [Your Name/Role]  
-**Status**: Draft | Under Review | Approved | Rejected
+# <PREFIX> PROPOSAL
+
+**Proposal ID**: `<PROPOSAL_ID>`  
+**Created At**: YYYY-MM-DD HH:MM:SS  
+**Origin**: [Telegram/Obsidian/Direct/Systems-Architect/Analyst]
+
+> **ID-Prefix legend**  
+> • `DEV-…` — generic dev proposal (Telegram, Obsidian, default flow)  
+> • `ARCH-…` — Systems Architect agent output  
+> • `NLST-…` — analyst agents (Data Flow Tracer, System Analyst, Bench Runner)
 
 ---
 
-## 🔍 Problem Statement
+## 📋 Kanban Card
 
-Describe the problem or design challenge you're addressing.
+| Field | Value |
+|-------|-------|
+| Card ID | `<CARD_ID>` |
+| Lifecycle Phase | `1/5 - Proposal` |
+| Created | YYYY-MM-DD HH:MM:SS |
+| Updated | - |
 
-## 💡 Proposed Solution(s)
-
-### Option 1: [Solution Name]
-[Detailed description]
-
-**Pros:**
-- ...
-- ...
-
-**Cons:**
-- ...
-- ...
-
-### Option 2: [Alternative]
-[If applicable]
+> **To move to next phase**: Drag card in Kanban Board to the right column.
 
 ---
 
-## 🏗️ Implementation Plan
+## ⚠️ WAITING FOR YOUR APPROVAL
 
-| Step | Action |
-|------|--------|
-| 1 | ... |
-| 2 | ... |
+> **⚠️ THIS PROPOSAL REQUIRES YOUR APPROVAL TO PROCEED**
 
----
-
-## 📋 Checklist
-
-- [ ] Documented all options considered
-- [ ] Pros/Cons analyzed
-- [ ] Implementation plan is clear
-- [ ] Related files linked
+| Phase | Name | Status | Approved By | Approved At |
+|-------|------|--------|-------------|-------------|
+| 1️⃣ | Proposal Generation | ⏳ Awaiting Approval | - | - |
+| 2️⃣ | Beta Council Review | 🔒 Locked | - | - |
+| 3️⃣ | Beta Testing | 🔒 Locked | - | - |
+| 4️⃣ | Alpha Polish (GUI+Perf) | 🔒 Locked | - | - |
+| 5️⃣ | Final Audit | 🔒 Locked | - | - |
 
 ---
 
-## 🔗 References & Backlinks
+## Original Request
 
-- [Related Documentation](../docs/SYSTEM_ARCHITECTURE.md)
-- [Parent Proposal] (if applicable)
-
----
-
-## 📊 Decision Log
-
-| Date | Decision | Notes |
-|------|----------|-------|
-| YYYY-MM-DD | Awaiting review | Initial proposal |
+[User's original request/description goes here]
 
 ---
 
-*Template: dev/templates/proposal-template.md*
+## LLM Technical Assessment
+
+_To be completed by LLM._
+
+---
+
+## Lifecycle Progress
+
+**Current Phase**: 1/5 - Proposal Generation  
+**Status**: 🟡 Proposal Created - Awaiting Your Approval  
+**Next Step**: Review the proposal and approve to begin development
+
+---
+
+## Technical Assessment (to be completed by Beta Council)
+
+- Complexity: _pending_
+- Model Recommendation: _pending_
+- Files to Create: _pending_
+- Beta Ready: _pending_
+
+---
+
+*Proposal created via [origin]*
+*Kanban Card ID: <CARD_ID>*
+*Note: You must approve each phase before proceeding to the next*

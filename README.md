@@ -14,6 +14,7 @@ It accepts prompts from your phone (Telegram), your notes (Obsidian), or a brows
 | 🔌 **Kanban Status Plugin** | New Obsidian plugin syncs card status to YAML frontmatter in real-time |
 | 🔧 **Robust Phase Handoffs** | Regex-based transitions that survive any LLM output formatting |
 | 📦 **Version Manager** | Automated SemVer bumping across all project files |
+| 🔄 **Proposal Sync Bridge** | Backend ↔ Vault sync with health monitoring and conflict detection |
 
 ---
 
@@ -213,7 +214,64 @@ See [dev/KANBAN_INTEGRATION.md](../dev/KANBAN_INTEGRATION.md) for full documenta
 
 ---
 
-## 📱 Interfaces
+## � Proposal Sync Bridge
+
+The **Proposal Sync Bridge** ensures that development proposals remain in sync between the backend (`cognitive-os/dev/proposals/`) and the Obsidian vault mirror (`1. P - Seedlings/dev/proposals/`).
+
+### Features
+
+- **One-way Sync**: Backend → Vault (backend is source of truth)
+- **Health Monitoring**: Green/Yellow/Red status indicators
+- **Conflict Detection**: Identifies files with different content in backend vs vault
+- **Content-Addressable Hashing**: SHA256-based change detection
+- **Sync History**: Tracks all sync operations for auditing
+
+### API Endpoints
+
+| Endpoint | Method | Description |
+|---|---|---|
+| `/api/sync/status` | GET | Current sync status with health indicator |
+| `/api/sync/proposals` | GET | List all proposals with sync status |
+| `/api/sync/missing` | GET | Proposals missing in vault |
+| `/api/sync/conflicts` | GET | Files with content conflicts |
+| `/api/sync/force-sync` | POST | Trigger manual sync |
+| `/api/sync/history` | GET | Sync operation history |
+
+### Usage
+
+**Check sync status:**
+```bash
+curl http://localhost:5000/api/sync/status
+```
+
+**Force sync:**
+```bash
+curl -X POST http://localhost:5000/api/sync/force-sync
+```
+
+**Python API:**
+```python
+from src.proposal_sync import ProposalSyncManager
+
+sync_manager = ProposalSyncManager()
+status = sync_manager.check_sync_status()
+
+if status.health == "red":
+    result = sync_manager.sync_backend_to_vault()
+    print(f"Synced {result.files_synced} files")
+```
+
+### Health Status
+
+- 🟢 **Green**: All proposals in sync
+- 🟡 **Yellow**: Some proposals missing in vault
+- 🔴 **Red**: Conflicts detected or other issues
+
+See [src/proposal_sync.py](../src/proposal_sync.py) for full API documentation.
+
+---
+
+## �📱 Interfaces
 
 ### Telegram
 
@@ -250,6 +308,7 @@ See [dev/KANBAN_INTEGRATION.md](../dev/KANBAN_INTEGRATION.md) for full documenta
 | [docs/SYSTEM_ARCHITECTURE.md](../docs/SYSTEM_ARCHITECTURE.md) | Full system diagrams — components, flows, Kanban, Dashboard |
 | [docs/MODEL_ORCHESTRATION.md](../docs/MODEL_ORCHESTRATION.md) | Model tiers, VRAM strategy, role system, lifecycle approval |
 | [docs/CHANGELOG.md](../docs/CHANGELOG.md) | Version history — what changed in each release |
+| [docs/PROPOSAL_SYNC_BRIDGE.md](../docs/PROPOSAL_SYNC_BRIDGE.md) | Backend ↔ Vault sync with health monitoring and conflict detection |
 | [dev/KANBAN_INTEGRATION.md](../dev/KANBAN_INTEGRATION.md) | Kanban automation deep-dive |
 | [QUICK_START_KANBAN.md](../QUICK_START_KANBAN.md) | Quick onboarding for Kanban workflow |
 

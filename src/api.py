@@ -1,16 +1,19 @@
 import asyncio
 import json
+import sys
 import uvicorn
 import os
 import re
 import yaml
-from typing import Optional, Union
+import psutil
+from typing import Optional, Union, Dict, Any
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from src.orchestrator import Orchestrator
 from src.obsidian_writer import ObsidianWriter
+from src.paths import VAULT_ROOT
 
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -95,6 +98,87 @@ async def save_master_config(request: Request):
         raise HTTPException(status_code=500, detail=f"Error saving config: {e}")
 
 # --- NEW: System Visualization Endpoints ---
+
+@app.get("/api/system/load")
+def get_system_load() -> Dict[str, Any]:
+    """Get current system resource usage (CPU, GPU, RAM)."""
+    try:
+        # Get CPU usage percentage
+        cpu_percent = psutil.cpu_percent(interval=0.1)
+        
+        # Get memory usage
+        memory = psutil.virtual_memory()
+        memory_percent = memory.percent
+        memory_used_gb = memory.used / (1024**3)
+        memory_total_gb = memory.total / (1024**3)
+        
+        # Try to get GPU usage for all GPUs via pynvml (nvidia-ml-py).
+        # We previously used GPUtil but it relies on `distutils` which is gone
+        # in Python 3.14. pynvml is NVIDIA's official binding and reports the
+        # same numbers as `nvidia-smi`. Two failure modes are surfaced loudly
+        # (printed to stderr) instead of silently swallowed — explicit dev/user
+        # rule: no silent drops in the diagnostic path.
+        gpu1_info = {"percent": 0, "memory_used_gb": 0, "memory_total_gb": 0, "available": False}
+        gpu2_info = {"percent": 0, "memory_used_gb": 0, "memory_total_gb": 0, "available": False}
+        gpu_probe_error = None
+
+        try:
+            import pynvml
+            pynvml.nvmlInit()
+            try:
+                gpu_count = pynvml.nvmlDeviceGetCount()
+                for idx in range(min(gpu_count, 2)):
+                    handle = pynvml.nvmlDeviceGetHandleByIndex(idx)
+                    name = pynvml.nvmlDeviceGetName(handle)
+                    if isinstance(name, bytes):
+                        name = name.decode("utf-8", errors="replace")
+                    mem = pynvml.nvmlDeviceGetMemoryInfo(handle)
+                    util = pynvml.nvmlDeviceGetUtilizationRates(handle)
+                    try:
+                        temp = pynvml.nvmlDeviceGetTemperature(
+                            handle, pynvml.NVML_TEMPERATURE_GPU
+                        )
+                    except Exception:
+                        temp = None
+                    info = {
+                        "percent": float(util.gpu),
+                        "memory_used_gb": mem.used / (1024 ** 3),
+                        "memory_total_gb": mem.total / (1024 ** 3),
+                        "available": True,
+                        "name": name,
+                        "temperature": temp,
+                    }
+                    if idx == 0:
+                        gpu1_info = info
+                    elif idx == 1:
+                        gpu2_info = info
+            finally:
+                pynvml.nvmlShutdown()
+        except ImportError as exc:
+            gpu_probe_error = f"pynvml not installed ({exc}); run: pip install nvidia-ml-py"
+            print(f"[GPU PROBE] {gpu_probe_error}", file=sys.stderr)
+        except Exception as exc:
+            gpu_probe_error = f"pynvml probe failed: {exc!r}"
+            print(f"[GPU PROBE] {gpu_probe_error}", file=sys.stderr)
+        
+        return {
+            "cpu": {
+                "percent": cpu_percent,
+                "cores": psutil.cpu_count()
+            },
+            "memory": {
+                "percent": memory_percent,
+                "used_gb": round(memory_used_gb, 2),
+                "total_gb": round(memory_total_gb, 2)
+            },
+            "gpu": gpu1_info,  # Keep backward compatibility
+            "gpu1": gpu1_info,
+            "gpu2": gpu2_info,
+            "gpu_probe_error": gpu_probe_error,  # null on success; string on failure (no silent drops)
+            "timestamp": os.path.getmtime(__file__)  # Use file mod time as a simple timestamp
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error getting system load: {e}")
 
 @app.get("/api/system/{diagram_type}")
 def get_system_diagram(diagram_type: str):
@@ -529,9 +613,8 @@ def process_prompt(request: PromptRequest):
             obsidian.save_memory_log(task_id, task_data, report_name)
 
         # --- IMPORTANT FIX: Calculate vault-relative path correctly ---
-        # Assume the Obsidian vault root is 'E:/Oranneg/CloudStation/Documents/Obsidian/Grand Nexus/'
-        # This needs to be configured accurately to your actual Obsidian vault root.
-        OBSIDIAN_VAULT_ROOT = "E:/Oranneg/CloudStation/Documents/Obsidian/Grand Nexus/"
+        # Use the centralized vault root from paths.py
+        OBSIDIAN_VAULT_ROOT = str(VAULT_ROOT)
         
         relative_path_for_obsidian_plugin = None
         if absolute_file_path:
@@ -541,9 +624,6 @@ def process_prompt(request: PromptRequest):
             except ValueError:
                 print(f"⚠️ Could not calculate relative path for {absolute_file_path}. Sending absolute path.")
                 relative_path_for_obsidian_plugin = absolute_file_path
-            
-        # The old way that was causing issues:
-        # relative_path = file_path.split("Grand Nexus/")[-1].replace("\\", "/") if file_path and "Grand Nexus" in file_path else file_path
 
         return {
             "status": "success",
@@ -565,6 +645,143 @@ def process_prompt(request: PromptRequest):
             "response": f"System Error: {str(e)}",
             "details": error_trace
         }
+
+# ============================================================================
+# Proposal Sync API Endpoints (DEV-20260521-001000-B5D5C0DE)
+# ============================================================================
+
+from src.proposal_sync import ProposalSyncManager
+
+# Initialize sync manager
+sync_manager = ProposalSyncManager()
+
+@app.get("/api/sync/status")
+def get_sync_status():
+    """
+    Get current sync status with health indicator.
+    
+    Returns:
+        - health: "green" (in sync), "yellow" (missing files), or "red" (conflicts)
+        - backend_count: Number of proposal files in backend
+        - vault_count: Number of proposal files in vault
+        - missing_in_vault: List of filenames missing in vault
+        - conflicts: List of files with content conflicts
+    """
+    try:
+        status = sync_manager.check_sync_status()
+        return status.to_dict()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error checking sync status: {e}")
+
+@app.get("/api/sync/proposals")
+def list_proposals_with_status():
+    """
+    List all proposals with their sync status.
+    
+    Returns:
+        List of proposals with backend/vault existence and hash info
+    """
+    try:
+        from src.proposal_sync import ProposalSyncManager, SyncStatus
+        
+        # Get files from both locations
+        backend_files = sync_manager._get_proposal_files(sync_manager.proposals_dir)
+        vault_files = sync_manager._get_proposal_files(sync_manager.vault_dir)
+        
+        # Create lookup dictionaries
+        vault_hashes = {f.filename: f for f in vault_files}
+        
+        proposals = []
+        for file in backend_files:
+            in_vault = file.filename in vault_hashes
+            vault_hash = vault_hashes[file.filename].content_hash if in_vault else None
+            
+            proposals.append({
+                "filename": file.filename,
+                "proposal_id": file.proposal_id,
+                "in_backend": True,
+                "in_vault": in_vault,
+                "backend_hash": file.content_hash,
+                "vault_hash": vault_hash,
+                "size": file.size,
+                "modified_at": file.modified_at.isoformat()
+            })
+        
+        return {"proposals": proposals, "count": len(proposals)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error listing proposals: {e}")
+
+@app.get("/api/sync/missing")
+def get_missing_proposals():
+    """
+    Get list of proposals missing in vault (exist in backend only).
+    
+    Returns:
+        List of filenames missing in vault
+    """
+    try:
+        missing = sync_manager.get_missing_files()
+        return {"missing": missing, "count": len(missing)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error getting missing proposals: {e}")
+
+@app.get("/api/sync/conflicts")
+def get_conflicts():
+    """
+    Get list of files with conflicts between backend and vault.
+    
+    Returns:
+        List of conflict details
+    """
+    try:
+        conflicts = sync_manager.detect_conflicts()
+        return {"conflicts": conflicts, "count": len(conflicts)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error detecting conflicts: {e}")
+
+@app.post("/api/sync/force-sync")
+def force_sync_proposals():
+    """
+    Force a sync from backend to vault.
+    
+    Returns:
+        SyncResult with details about the operation
+    """
+    try:
+        result = sync_manager.sync_backend_to_vault()
+        
+        if result.success:
+            return {
+                "status": "success",
+                "message": f"Synced {result.files_synced} files",
+                "result": result.to_dict()
+            }
+        else:
+            return {
+                "status": "partial_success",
+                "message": f"Sync completed with errors",
+                "result": result.to_dict()
+            }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error during sync: {e}")
+
+@app.get("/api/sync/history")
+def get_sync_history(limit: int = 10):
+    """
+    Get sync operation history.
+    
+    Args:
+        limit: Maximum number of records to return
+        
+    Returns:
+        List of sync history records
+    """
+    try:
+        history = sync_manager.get_sync_history(limit=limit)
+        return {"history": history, "count": len(history)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error getting sync history: {e}")
+
 
 # Mount the static directory for the dashboard AFTER all other API routes
 app.mount("/", StaticFiles(directory=DASHBOARD_DIR, html=True), name="static")

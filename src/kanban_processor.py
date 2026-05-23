@@ -33,6 +33,7 @@ from dev_route import DevRouteManager
 import json
 
 from src.sync_check import trigger_sync_check
+from src.paths import VAULT_ROOT
 
 
 def _get_sync_manager():
@@ -104,8 +105,9 @@ class KanbanProcessor:
         Args:
             vault_path: Optional path to Obsidian vault (auto-dected if not provided)
         """
-        # Auto-detect vault root or use specified path
-        self.vault_path = vault_path or self._find_vault_root() or "E:\\Oranneg\\CloudStation\\Documents\\Obsidian\\Grand Nexus"
+        # Auto-detect vault root or use specified path (use paths.py VAULT_ROOT as fallback)
+        fallback_vault = str(VAULT_ROOT)
+        self.vault_path = vault_path or self._find_vault_root() or fallback_vault
         # Kanban board is in 1. P - Seedlings folder
         self.kanban_file = os.path.join("1. P - Seedlings", "Dev-KanBan.md")
         # Cache file location - save to cognitive-os/dev folder (two levels up from src)

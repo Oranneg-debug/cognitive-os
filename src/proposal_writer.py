@@ -20,6 +20,12 @@ from src.paths import (
     KANBAN_FILE,
 )
 
+# Governance Foundation imports
+from src.workflow_models import ValidatedProposal, Severity, WorkflowPhase
+from src.schema_validator import validate_proposal_yaml, SchemaValidationError
+from src.handoff_vault import HandoffVault
+from src.approval_logger import ApprovalLogger
+
 
 class ProposalWriter:
     """

@@ -266,6 +266,111 @@ def normalize_config(raw: Mapping[str, Any] | None) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# Effective-config drift detection
+# ---------------------------------------------------------------------------
+
+# Field aliases LM Studio's SDK reports back vs the snake-case canonical
+# names we normalise to. Probed empirically against lmstudio-python 1.5.0
+# — the SDK info struct uses camelCase keys and sometimes nests them.
+_LIVE_CONFIG_FIELD_ALIASES: dict[str, tuple[str, ...]] = {
+    "context_length": ("contextLength", "context_length", "n_ctx"),
+    "flash_attention": ("flashAttention", "flash_attention"),
+    "llama_k_cache_quantization_type": (
+        "llamaKCacheQuantizationType",
+        "kCacheQuant",
+        "cache_type_k",
+    ),
+    "llama_v_cache_quantization_type": (
+        "llamaVCacheQuantizationType",
+        "vCacheQuant",
+        "cache_type_v",
+    ),
+}
+
+
+def _extract_live_value(live: Mapping[str, Any], canonical_key: str) -> Any:
+    """Return the first non-None value in ``live`` for any alias of
+    ``canonical_key``. Walks nested dicts one level deep.
+    """
+    aliases = _LIVE_CONFIG_FIELD_ALIASES.get(canonical_key, (canonical_key,))
+    # flat probe
+    for alias in aliases:
+        if alias in live and live[alias] is not None:
+            return live[alias]
+    # one-level-nested probe (e.g. live["loadConfig"]["contextLength"])
+    for key, val in live.items():
+        if isinstance(val, Mapping):
+            for alias in aliases:
+                if alias in val and val[alias] is not None:
+                    return val[alias]
+    return None
+
+
+def _diff_effective_vs_requested(
+    live: Mapping[str, Any],
+    requested: Mapping[str, Any],
+    extras: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Compare LM Studio's reported live config against what was requested.
+
+    Returns a dict of ``{field: {"live": ..., "requested": ...}}`` for every
+    field that differs. Empty dict means "matches, safe to reuse".
+
+    Only checks the fields that actually affect VRAM / generation behaviour
+    (context_length, flash_attention, KV-cache quant, GPU offload, parallel).
+    Differences on cosmetic / unknown fields are ignored.
+    """
+    diff: dict[str, Any] = {}
+    extras = extras or {}
+
+    # 1. Direct canonical fields.
+    for key, want in requested.items():
+        if key == "__loader_extras__":
+            continue
+        live_val = _extract_live_value(live, key)
+        if live_val is None:
+            # The SDK didn't report this field. Be conservative: only flag
+            # drift for the high-impact knobs (context_length / FA).
+            if key in {"context_length", "flash_attention"}:
+                diff[key] = {"live": "<unreported>", "requested": want}
+            continue
+        # Normalise types for comparison (the SDK sometimes wraps numbers).
+        if isinstance(want, bool):
+            if bool(live_val) != want:
+                diff[key] = {"live": live_val, "requested": want}
+        elif isinstance(want, (int, float)):
+            try:
+                if int(live_val) != int(want):
+                    diff[key] = {"live": live_val, "requested": want}
+            except (TypeError, ValueError):
+                diff[key] = {"live": live_val, "requested": want}
+        elif isinstance(want, Mapping):
+            # e.g. {"ratio": "max"} for gpu — compare the ratio field.
+            live_ratio = live_val.get("ratio") if isinstance(live_val, Mapping) else None
+            want_ratio = want.get("ratio")
+            if str(live_ratio) != str(want_ratio):
+                diff[key] = {"live": live_val, "requested": want}
+        else:
+            if str(live_val) != str(want):
+                diff[key] = {"live": live_val, "requested": want}
+
+    # 2. The CLI-only `n_parallel` lives in extras. If it's set, the live
+    # instance MUST have been loaded via the CLI path — there's no way to
+    # know from the SDK info struct, so a parallelism request always forces
+    # a reload (safe default).
+    if "max_parallel_predictions" in extras or "n_parallel" in extras:
+        want_parallel = extras.get("max_parallel_predictions") or extras.get("n_parallel")
+        live_parallel = _extract_live_value(live, "max_parallel_predictions")
+        if live_parallel is None or int(live_parallel) != int(want_parallel):
+            diff["max_parallel_predictions"] = {
+                "live": live_parallel if live_parallel is not None else "<unreported>",
+                "requested": want_parallel,
+            }
+
+    return diff
+
+
+# ---------------------------------------------------------------------------
 # The loader
 # ---------------------------------------------------------------------------
 
@@ -414,24 +519,47 @@ class LMStudioLoader:
         extras = norm.pop("__loader_extras__", {})
 
         # Idempotency: check if an instance with this identifier is already
-        # loaded with the same effective config.
+        # loaded WITH MATCHING CONFIG. If the live config differs from the
+        # requested config on any key field, unload + reload — never silently
+        # reuse a stale instance. (Fix landed during bootstrap of the
+        # governance proposal stack 2026-05-23; see
+        # dev/decisions/_bootstrap_approvals_2026-05-22.md "DIAGNOSTIC
+        # INCIDENT #2" for the symptom and rationale.)
         existing = next(
             (i for i in self.list_loaded() if i.identifier == identifier),
             None,
         )
+        config_diff: dict[str, Any] = {}
         if existing and not force_reload:
-            # We can't easily compare every config field, so we trust the
-            # identifier as the cache key for now. A stricter check would
-            # diff `get_effective_config(identifier)` against `norm`.
-            return LoadResult(
-                model_key=model_key,
-                identifier=identifier,
-                action="reused",
-                config_applied=norm,
-                duration_seconds=0.0,
-                snapshot=snap,
+            try:
+                live = self.get_effective_config(identifier)
+                config_diff = _diff_effective_vs_requested(live, norm, extras)
+            except Exception as exc:  # never silently swallow; log + force reload
+                print(
+                    f"[LOADER] effective-config probe failed for "
+                    f"identifier={identifier!r}: {exc!r} — forcing reload",
+                    file=sys.stderr,
+                )
+                config_diff = {"__probe_failed__": repr(exc)}
+
+            if not config_diff:
+                return LoadResult(
+                    model_key=model_key,
+                    identifier=identifier,
+                    action="reused",
+                    config_applied=norm,
+                    duration_seconds=0.0,
+                    snapshot=snap,
+                )
+            # Config drift detected — log loudly so the dashboard / logs
+            # show which field forced the reload. No silent drops.
+            print(
+                f"[LOADER] config drift on identifier={identifier!r} "
+                f"-> reloading. diff={config_diff}",
+                file=sys.stderr,
             )
-        if existing and force_reload:
+            self.unload(identifier)
+        elif existing and force_reload:
             self.unload(identifier)
 
         # Look up the downloaded handle.

@@ -61,6 +61,9 @@ try:
 except ImportError:
     _HAVE_YAML = False
 
+# Import centralized paths from paths.py
+from src.paths import VAULT_ROOT
+
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -70,12 +73,6 @@ _HERE = Path(__file__).resolve().parent
 
 # The two canonical proposal locations (project + vault mirror).
 PROJECT_PROPOSALS = (_HERE.parent / "dev" / "proposals").resolve()
-VAULT_ROOT = Path(
-    os.environ.get(
-        "OBSIDIAN_VAULT_PATH",
-        r"E:\Oranneg\CloudStation\Documents\Obsidian\Grand Nexus",
-    )
-)
 VAULT_PROPOSALS = (VAULT_ROOT / "1. P - Seedlings" / "dev" / "proposals").resolve()
 VAULT_KANBAN = (VAULT_ROOT / "1. P - Seedlings" / "Dev-KanBan.md").resolve()
 
@@ -83,8 +80,13 @@ VAULT_KANBAN = (VAULT_ROOT / "1. P - Seedlings" / "Dev-KanBan.md").resolve()
 # proposals that were previously on the board but have since been removed).
 KANBAN_CACHE = (_HERE.parent / "dev" / ".kanban_cache.json").resolve()
 
-# Watcher-friendly proposal-id pattern: DEV-YYYYMMDD-HHMMSS-XXXX...
-PROPOSAL_ID_RE = re.compile(r"DEV-\d{8}-\d{6}-[A-Z0-9]+")
+# Watcher-friendly proposal-id pattern: <PREFIX>-YYYYMMDD-HHMMSS-XXXX...
+# Supported prefixes:
+#   DEV  — generic dev proposal (Telegram / Obsidian / default)
+#   ARCH — Systems Architect agent output
+#   NLST — analyst agents (Data Flow Tracer, System Analyst, Bench Runner)
+PROPOSAL_ID_PREFIXES = ("DEV", "ARCH", "NLST")
+PROPOSAL_ID_RE = re.compile(r"(?:DEV|ARCH|NLST)-\d{8}-\d{6}-[A-Z0-9]+")
 
 # Frontmatter delimiters
 FM_OPEN = "---"
@@ -169,11 +171,18 @@ def _extract_proposal_from_file(path: Path) -> Proposal | None:
         print(f"  ⚠️  cannot read {path}: {exc!r}", file=sys.stderr)
         return None
 
-    # Proposal ID lives in the body (Markdown), not the frontmatter.
-    m = PROPOSAL_ID_RE.search(text)
-    if not m:
-        return None
-    proposal_id = m.group(0)
+    # Proposal ID: prefer the filename (canonical), fall back to body scan.
+    # The body may reference *other* DEV-ids in `depends_on:` / `supersedes:`
+    # that appear before the proposal's own ID — using the first body match
+    # would mis-tag the card. Filename is unambiguous.
+    fname_match = PROPOSAL_ID_RE.search(path.name)
+    if fname_match:
+        proposal_id = fname_match.group(0)
+    else:
+        m = PROPOSAL_ID_RE.search(text)
+        if not m:
+            return None
+        proposal_id = m.group(0)
 
     fm = _parse_frontmatter(text)
     phase = (fm.get("phase") or "").strip().lower() or None

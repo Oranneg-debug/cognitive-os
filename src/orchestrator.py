@@ -129,6 +129,48 @@ class Orchestrator:
             llm.eject_all_models(force_all=True)
         except Exception as e:
             print(f"⚠️ Startup flush failed (LM Studio might not be fully ready yet): {e}")
+        
+        # Perform startup sync health check
+        self._perform_startup_sync_check()
+    
+    def _perform_startup_sync_check(self):
+        """
+        Perform a sync health check on startup and log any issues.
+        """
+        try:
+            from src.proposal_sync import ProposalSyncManager
+            
+            print("\n🔍 Performing startup proposal sync health check...")
+            sync_manager = ProposalSyncManager()
+            status = sync_manager.check_sync_status()
+            status_dict = status.to_dict()
+            
+            health_emoji = {
+                "green": "🟢",
+                "yellow": "🟡",
+                "red": "🔴"
+            }.get(status_dict["health"], "⚪")
+            
+            print(f"   Sync Status: {health_emoji} {status_dict['health'].upper()}")
+            print(f"   Backend Proposals: {status_dict['backend_count']}")
+            print(f"   Vault Proposals: {status_dict['vault_count']}")
+            
+            if status_dict["missing_in_vault"]:
+                print(f"   ⚠️ Missing in vault: {len(status_dict['missing_in_vault'])} files")
+                for filename in status_dict["missing_in_vault"][:3]:  # Show first 3
+                    print(f"      - {filename}")
+            
+            if status_dict["conflicts"]:
+                print(f"   🚨 Conflicts detected: {len(status_dict['conflicts'])} files")
+                for conflict in status_dict["conflicts"][:3]:  # Show first 3
+                    print(f"      - {conflict['filename']}")
+            
+            print()
+            
+        except ImportError:
+            print("   ⚠️ Sync manager not available (proposal_sync module missing)")
+        except Exception as e:
+            print(f"   ⚠️ Could not perform startup sync check: {e}")
 
     def _load_sovereign_compass(self) -> str:
         compass_path = os.getenv("SOVEREIGN_COMPASS_PATH")
@@ -432,22 +474,54 @@ Output your final blueprint in the specified JSON format for your role.""",
         return report
 
     def _restore_default_state(self, progress_callback=None):
-        """Silently reloads the default boot LLM back into VRAM so it's ready for the next simple request."""
-        
+        """Silently reloads the default boot LLM back into VRAM so it's ready for the next simple request.
+
+        NOTE 2026-05-23: ctx + device are read from master_config.md instead
+        of being hardcoded. The previous `-c 8192` literal was the fifth
+        silent-drop incident discovered during the governance bootstrap
+        (see dev/decisions/_bootstrap_approvals_2026-05-22.md). With ctx
+        hardcoded to 8192 here, every council run would reset ministral
+        back to 8K immediately after running — guaranteeing the *next*
+        council's scribe role failed with n_keep > n_ctx.
+        """
+
         # Flush the heavy models first!
         llm.eject_all_models()
-        
-        model_id = get_role_config("simple")["model"]
-        msg = f"🔄 Restoring default boot LLM to VRAM..."
+
+        role_cfg = get_role_config("simple") or {}
+        model_id = role_cfg["model"]
+
+        # ctx: prefer the role config, fall back to a safe 32K.
+        ctx = (
+            role_cfg.get("context_window")
+            or role_cfg.get("context_length")
+            or 32768
+        )
+        # Device: -1 means "all GPU layers"; 0 means CPU. Anything else
+        # we pass through as-is.
+        gpu_layers = role_cfg.get("gpu_layers", 0)
+        if gpu_layers == 0:
+            gpu_flag = "--gpu off"
+        elif gpu_layers == -1:
+            gpu_flag = "--gpu max"
+        else:
+            # Fractional offload not exposed via the CLI; let LM Studio
+            # use whatever the saved per-model default is.
+            gpu_flag = ""
+
+        cmd = f"lms load {model_id} -c {int(ctx)} {gpu_flag} -y".strip()
+        msg = f"🔄 Restoring default boot LLM to VRAM ({model_id} @ {ctx} ctx)..."
         print(f"--> {msg}")
-        if progress_callback: progress_callback(msg)
-        
+        print(f"[RESTORE] {cmd}")
+        if progress_callback:
+            progress_callback(msg)
+
         # Fire and forget lms load in a background process
         subprocess.Popen(
-            f"lms load {model_id} -c 8192 -y", 
-            stdout=subprocess.DEVNULL, 
+            cmd,
+            stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
-            shell=True
+            shell=True,
         )
 
     def process_request(self, user_input: str, image_base64: str = None, progress_callback=None, compass_weight: str = None, model_presets: list = None, document_base64: str = None, is_pdf: bool = False, source_file_path: str = None):

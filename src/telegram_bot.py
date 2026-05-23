@@ -243,7 +243,11 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     
     print("✅ Bot is polling. Send a message to your bot on Telegram!")
-    app.run_polling()
+    # drop_pending_updates=True flushes the backlog on startup so messages
+    # sent (or deleted) before the bot was running don't replay as ghost
+    # councils. Without this, every restart re-fires every unconsumed
+    # message in Telegram's queue. See bootstrap ledger 2026-05-22/23.
+    app.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
     main()

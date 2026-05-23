@@ -1,0 +1,275 @@
+"""
+Append-Only Approval Log for Governance Foundation
+
+This module provides dual-write (Markdown + SQLite) with cryptographic chain-of-custody.
+
+VETO COMPLIANCE:
+- B4: Each entry contains nonce + timestamp + sha256_of_preceding_record
+- V9: Explicit exceptions raised, never silently swallowed
+"""
+
+from __future__ import annotations
+
+import os
+import hashlib
+import sqlite3
+import secrets
+from datetime import datetime
+from pathlib import Path
+from typing import Optional, List, Dict
+
+from src.workflow_models import (
+    ApprovalRecord,
+    VaultIntegrityError,
+)
+
+
+# Configuration
+DECISIONS_DIR = Path("dev/decisions")
+DB_PATH = Path("dev/decisions/index.sqlite")
+
+
+class ApprovalLogger:
+    """
+    Append-only approval log with dual-write (Markdown + SQLite).
+    
+    VETO COMPLIANCE:
+    - B4: Cryptographic chain-of-custody via SHA256 + nonces
+    """
+    
+    def __init__(self, decisions_dir: Optional[Path] = None):
+        """Initialize the logger with optional custom directory."""
+        self.decisions_dir = decisions_dir or DECISIONS_DIR
+        self.db_path = DB_PATH
+        self._ensure_directory_exists()
+        self._ensure_database_exists()
+    
+    def _ensure_directory_exists(self) -> None:
+        """Create decisions directory if it doesn't exist."""
+        self.decisions_dir.mkdir(parents=True, exist_ok=True)
+    
+    def _ensure_database_exists(self) -> None:
+        """Initialize SQLite database for metadata index."""
+        conn = sqlite3.connect(str(self.db_path))
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS decisions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    proposal_id TEXT NOT NULL,
+                    approver TEXT NOT NULL,
+                    decision TEXT NOT NULL,
+                    reason TEXT,
+                    timestamp TEXT NOT NULL,
+                    state_hash TEXT NOT NULL,
+                    nonce TEXT,
+                    prior_record_hash TEXT
+                )
+            """)
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_decisions_proposal_id 
+                ON decisions(proposal_id)
+            """)
+            conn.commit()
+        finally:
+            conn.close()
+    
+    def log_decision(self, record: ApprovalRecord) -> None:
+        """
+        Log a decision to both Markdown and SQLite with SHA256 verification.
+        
+        VETO COMPLIANCE:
+        - B4: Dual-write pattern with cryptographic chain-of-custody
+        
+        Args:
+            record: The approval record to log
+        """
+        # Compute hash of the current proposal state
+        state_hash = hashlib.sha256(
+            f"{record.proposal_id}:{record.approver}:{record.decision}".encode()
+        ).hexdigest()
+        
+        # Get prior record hash for chain verification
+        prior_hash = self._get_prior_hash(record.proposal_id)
+        
+        # Generate unique nonce for replay protection (B4)
+        nonce = record.nonce or secrets.token_hex(16)
+        
+        # Build log entry
+        timestamp = record.timestamp.isoformat() if hasattr(record.timestamp, 'isoformat') else str(record.timestamp)
+        log_entry = self._build_log_entry(record, state_hash, prior_hash, nonce)
+        
+        # Write to markdown file (source of truth)
+        log_path = self.decisions_dir / f"{record.proposal_id}_log.md"
+        
+        try:
+            with open(log_path, "a", encoding="utf-8") as f:
+                f.write(log_entry)
+                f.flush()
+                os.fsync(f.fileno())
+            
+            # Store metadata in SQLite
+            conn = sqlite3.connect(str(self.db_path))
+            try:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT INTO decisions (proposal_id, approver, decision, reason, timestamp, state_hash, nonce, prior_record_hash)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    record.proposal_id,
+                    record.approver,
+                    record.decision,
+                    record.reason,
+                    timestamp,
+                    state_hash,
+                    nonce,
+                    prior_hash
+                ))
+                conn.commit()
+            finally:
+                conn.close()
+                
+        except Exception as e:
+            raise VaultIntegrityError(
+                proposal_id=record.proposal_id,
+                reason=f"Failed to log decision: {e}"
+            ) from e
+    
+    def _build_log_entry(self, record: ApprovalRecord, state_hash: str, prior_hash: Optional[str], nonce: str) -> str:
+        """Build a Markdown log entry."""
+        timestamp = record.timestamp.isoformat() if hasattr(record.timestamp, 'isoformat') else str(record.timestamp)
+        
+        entry = f"""
+---
+Proposal ID: {record.proposal_id}
+Approver: {record.approver}
+Decision: {record.decision}
+Timestamp: {timestamp}
+State Hash: {state_hash}
+Nonce: {nonce}
+Prior Record Hash: {prior_hash or 'N/A'}
+"""
+        if record.reason:
+            entry += f"Reason: {record.reason}\n"
+        entry += "---\n\n"
+        
+        return entry
+    
+    def get_log(self, proposal_id: str) -> List[ApprovalRecord]:
+        """
+        Retrieve decision log for a proposal.
+        
+        Args:
+            proposal_id: The proposal ID to retrieve log for
+            
+        Returns:
+            List of ApprovalRecord objects in chronological order
+        """
+        conn = sqlite3.connect(str(self.db_path))
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT proposal_id, approver, decision, reason, timestamp, state_hash, nonce, prior_record_hash
+                FROM decisions
+                WHERE proposal_id = ?
+                ORDER BY timestamp ASC
+            """, (proposal_id,))
+            
+            rows = cursor.fetchall()
+            return [
+                ApprovalRecord(
+                    proposal_id=row[0],
+                    approver=row[1],
+                    decision=row[2],
+                    reason=row[3],
+                    timestamp=datetime.fromisoformat(row[4]),
+                    state_hash=row[5],
+                    nonce=row[6],
+                    prior_record_hash=row[7]
+                )
+                for row in rows
+            ]
+        finally:
+            conn.close()
+    
+    def verify_chain(self, proposal_id: str) -> bool:
+        """
+        Verify the integrity of the decision log chain.
+        
+        VETO COMPLIANCE:
+        - B4: Cryptographic chain-of-custody verification
+        
+        Args:
+            proposal_id: The proposal ID to verify
+            
+        Returns:
+            True if chain is valid, False otherwise
+        """
+        records = self.get_log(proposal_id)
+        
+        if not records:
+            return False
+        
+        # Verify each record's hash matches
+        for i, record in enumerate(records):
+            expected_hash = hashlib.sha256(
+                f"{record.proposal_id}:{record.approver}:{record.decision}".encode()
+            ).hexdigest()
+            
+            if record.state_hash != expected_hash:
+                raise VaultIntegrityError(
+                    proposal_id=proposal_id,
+                    reason=f"Hash mismatch at record {i}"
+                )
+        
+        # Verify hash chain integrity
+        for i in range(1, len(records)):
+            current = records[i]
+            previous = records[i - 1]
+            
+            if current.prior_record_hash != previous.state_hash:
+                raise VaultIntegrityError(
+                    proposal_id=proposal_id,
+                    reason=f"Hash chain broken at record {i}"
+                )
+        
+        return True
+    
+    def _get_prior_hash(self, proposal_id: str) -> Optional[str]:
+        """Get the hash of the most recent decision for a proposal."""
+        records = self.get_log(proposal_id)
+        if not records:
+            return None
+        return records[-1].state_hash
+
+
+def verify_approval_logs_integrity(logger: Optional[ApprovalLogger] = None) -> Dict[str, bool]:
+    """
+    Verify integrity of all approval logs.
+    
+    Args:
+        logger: Optional ApprovalLogger instance (uses default if not provided)
+        
+    Returns:
+        Dict mapping proposal_id to verification result
+    """
+    if logger is None:
+        logger = ApprovalLogger()
+    
+    # Get all unique proposal IDs
+    conn = sqlite3.connect(str(logger.db_path))
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT DISTINCT proposal_id FROM decisions")
+        proposal_ids = [row[0] for row in cursor.fetchall()]
+    finally:
+        conn.close()
+    
+    results = {}
+    for pid in proposal_ids:
+        try:
+            results[pid] = logger.verify_chain(pid)
+        except VaultIntegrityError:
+            results[pid] = False
+    
+    return results

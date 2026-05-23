@@ -15,6 +15,9 @@
                 <ul id="roles-list">
                     <!-- Roles will be dynamically inserted here -->
                 </ul>
+                <button id="add-role-btn" class="add-item-btn">+ Add New Role</button>
+                <button id="add-meeting-btn" class="add-item-btn">+ Create New Meeting Type</button>
+                
                 <h2>Base Models</h2>
                 <ul id="models-list">
                     <!-- Models will be dynamically inserted here -->
@@ -31,7 +34,7 @@
                     <option value="/boardroom">🏛 Sequential Boardroom</option>
                     <option value="/oracle">🔮 Oracle Council</option>
                     <option value="/nft">💎 NFT Creation</option>
-                    <option value="/dev">🧪 Dev Lifecycle (creates proposal)</option>
+                    <option value="/dev">🧪 Dev Team (creates proposal)</option>
                 </select>
                 <input type="text" id="test-prompt-input" placeholder="Prompt for the selected orchestration…">
                 <button id="test-btn" class="test-btn">Run Orchestration</button>
@@ -40,17 +43,98 @@
         <main class="main-content">
             <header>
                 <div class="tabs">
-                    <button class="tab-link active" data-tab="config">Configuration</button>
+                    <button class="tab-link active" data-tab="home">Home</button>
                     <button class="tab-link" data-tab="orchestrations">Orchestrations</button>
+                    <button class="tab-link" data-tab="config">Models & Roles</button>
                     <button class="tab-link" data-tab="lmstudio">LM Studio</button>
-                    <button class="tab-link" data-tab="structure">System Structure</button>
-                    <button class="tab-link" data-tab="flow">Request Flow</button>
-                    <button class="tab-link" data-tab="kanban">Kanban Workflow</button>
+                    <button class="tab-link" data-tab="system">System</button>
                 </div>
-                <button id="save-btn" class="save-btn" disabled>Save Configuration</button>
+                <div class="config-actions" style="display: none;">
+                    <button id="save-btn" class="save-btn" disabled>Save Configuration</button>
+                    <button id="save-preset-btn" class="preset-btn" title="Save current config as preset">Save Preset</button>
+                    <button id="load-preset-btn-config" class="preset-btn" title="Load saved preset">Load Preset</button>
+                    <button id="push-obsidian-btn" class="preset-btn" title="Push to Obsidian vault">Push to Obsidian</button>
+                </div>
             </header>
 
-            <div id="config" class="tab-content active">
+            <div id="home" class="tab-content active">
+                <div class="home-page">
+                    <h1>🧠 Cognitive OS Control Center</h1>
+                    
+                    <!-- System Status Cards -->
+                    <div class="status-grid">
+                        <div class="status-card">
+                            <h3>System Load</h3>
+                            <div class="metrics">
+                                <div class="metric">
+                                    <label>CPU</label>
+                                    <div class="metric-bar">
+                                        <div class="metric-fill cpu-fill" id="cpu-bar"></div>
+                                        <span class="metric-text" id="cpu-text">--</span>
+                                    </div>
+                                </div>
+                                <div class="metric">
+                                    <label>Memory</label>
+                                    <div class="metric-bar">
+                                        <div class="metric-fill ram-fill" id="ram-bar"></div>
+                                        <span class="metric-text" id="ram-text">--</span>
+                                    </div>
+                                </div>
+                                <div class="metric">
+                                    <label>GPU</label>
+                                    <div class="metric-bar">
+                                        <div class="metric-fill gpu-fill" id="gpu-bar"></div>
+                                        <span class="metric-text" id="gpu-text">--</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="status-card">
+                            <h3>Model Status</h3>
+                            <div id="home-loaded-models" class="model-list">
+                                <p class="placeholder">Loading models...</p>
+                            </div>
+                        </div>
+                        
+                        <div class="status-card">
+                            <h3>Empty Seats</h3>
+                            <div id="home-empty-seats" class="empty-seats-list">
+                                <p class="placeholder">Checking roles...</p>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Quick Actions -->
+                    <div class="quick-actions">
+                        <h2>Quick Actions</h2>
+                        <div class="action-buttons">
+                            <button class="action-btn" onclick="switchToTab('orchestrations')">
+                                🎼 Run Orchestration
+                            </button>
+                            <button class="action-btn" onclick="switchToTab('config')">
+                                ⚙️ Configure Roles
+                            </button>
+                            <button class="action-btn" onclick="switchToTab('lmstudio')">
+                                🖥️ LM Studio Console
+                            </button>
+                            <button class="action-btn" id="load-preset-btn">
+                                📥 Load Obsidian Preset
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <!-- Recent Activity -->
+                    <div class="recent-activity">
+                        <h2>Recent Orchestrations</h2>
+                        <div id="home-recent" class="recent-list">
+                            <p class="placeholder">No recent activity</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="config" class="tab-content">
                 <div class="test-panel-container">
                     <h1 id="config-title">Select a Role or Model to Configure</h1>
                     <div class="test-panel-inline">
@@ -72,31 +156,93 @@
                         prefix forces the pattern.
                     </p>
 
-                    <div class="orch-prompt-row">
-                        <textarea id="orch-prompt" rows="4"
-                            placeholder="e.g. 'Design a memento-mori back piece that nods to bioluminescent jellyfish'"></textarea>
-                        <div class="orch-options">
-                            <label>Compass weight
-                                <select id="orch-compass">
-                                    <option value="">Default (per-role)</option>
-                                    <option value="MAXIMUM">MAXIMUM</option>
-                                    <option value="HIGH">HIGH</option>
-                                    <option value="MEDIUM">MEDIUM</option>
-                                    <option value="LOW">LOW</option>
-                                    <option value="IGNORE">IGNORE</option>
-                                </select>
-                            </label>
+                    <div class="orch-layout">
+                        <div class="orch-main-column">
+                            <div class="orch-prompt-row">
+                                <textarea id="orch-prompt" rows="4"
+                                    placeholder="e.g. 'Design a memento-mori back piece that nods to bioluminescent jellyfish'"></textarea>
+                                <div class="orch-options">
+                                    <label>Compass weight
+                                        <select id="orch-compass">
+                                            <option value="">Default (per-role)</option>
+                                            <option value="MAXIMUM">MAXIMUM</option>
+                                            <option value="HIGH">HIGH</option>
+                                            <option value="MEDIUM">MEDIUM</option>
+                                            <option value="LOW">LOW</option>
+                                            <option value="IGNORE">IGNORE</option>
+                                        </select>
+                                    </label>
+                                </div>
+                            </div>
+
+                            <div id="orch-grid" class="orch-grid">
+                                <!-- Orchestration cards injected here -->
+                            </div>
                         </div>
-                    </div>
 
-                    <div id="orch-grid" class="orch-grid">
-                        <!-- Orchestration cards injected here -->
-                    </div>
+                        <div class="orch-side-column">
+                            <!-- System Load Widget -->
+                            <div class="status-card">
+                                <h3>System Load</h3>
+                                <div class="metrics">
+                                    <div class="metric">
+                                        <label>CPU</label>
+                                        <div class="metric-bar">
+                                            <div class="metric-fill cpu-fill" id="orch-cpu-bar"></div>
+                                            <span class="metric-text" id="orch-cpu-text">--</span>
+                                        </div>
+                                    </div>
+                                    <div class="metric">
+                                        <label>Memory</label>
+                                        <div class="metric-bar">
+                                            <div class="metric-fill ram-fill" id="orch-ram-bar"></div>
+                                            <span class="metric-text" id="orch-ram-text">--</span>
+                                        </div>
+                                    </div>
+                                    <div class="metric">
+                                        <label>GPU 1</label>
+                                        <div class="metric-bar">
+                                            <div class="metric-fill gpu-fill" id="orch-gpu-bar"></div>
+                                            <span class="metric-text" id="orch-gpu-text">--</span>
+                                        </div>
+                                    </div>
+                                    <div class="metric">
+                                        <label>VRAM 1</label>
+                                        <div class="metric-bar">
+                                            <div class="metric-fill vram-fill" id="orch-vram1-bar"></div>
+                                            <span class="metric-text" id="orch-vram1-text">--</span>
+                                        </div>
+                                    </div>
+                                    <div class="metric">
+                                        <label>GPU 2</label>
+                                        <div class="metric-bar">
+                                            <div class="metric-fill gpu-fill" id="orch-gpu2-bar"></div>
+                                            <span class="metric-text" id="orch-gpu2-text">--</span>
+                                        </div>
+                                    </div>
+                                    <div class="metric">
+                                        <label>VRAM 2</label>
+                                        <div class="metric-bar">
+                                            <div class="metric-fill vram-fill" id="orch-vram2-bar"></div>
+                                            <span class="metric-text" id="orch-vram2-text">--</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
 
-                    <div id="orch-output" class="orch-output">
-                        <h3>Output</h3>
-                        <div class="orch-meta"></div>
-                        <pre class="orch-response"><em>No run yet.</em></pre>
+                            <!-- Output Log -->
+                            <div id="orch-output" class="orch-output">
+                                <div class="orch-output-header">
+                                    <h3>Output</h3>
+                                    <div class="orch-log-controls">
+                                        <button id="clear-orch-log" class="log-btn" title="Clear current log">Clear Log</button>
+                                        <button id="save-orch-log" class="log-btn" title="Save log for analysis">Save Log</button>
+                                    </div>
+                                </div>
+                                <div class="orch-meta"></div>
+                                <pre class="orch-response"><em>No run yet.</em></pre>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -133,6 +279,14 @@
                                         </thead>
                                         <tbody><tr><td colspan="4" class="lms-empty">loading…</td></tr></tbody>
                                     </table>
+                                </div>
+                                
+                                <!-- Model Defaults & Capabilities Window -->
+                                <div class="lms-model-defaults">
+                                    <h4>Model Defaults & Capabilities</h4>
+                                    <div id="model-defaults-content" class="model-defaults-grid">
+                                        <p class="placeholder">Select a loaded model to view defaults</p>
+                                    </div>
                                 </div>
                             </article>
 
@@ -326,17 +480,29 @@
                 </div>
             </div>
 
-            <div id="structure" class="tab-content">
-                <!-- System Structure Diagram will be loaded here -->
-                <div class="placeholder">Loading System Structure...</div>
-            </div>
-            <div id="flow" class="tab-content">
-                <!-- Request Flow Diagram will be loaded here -->
-                <div class="placeholder">Loading Request Flow...</div>
-            </div>
-            <div id="kanban" class="tab-content">
-                <!-- Kanban Workflow Diagram will be loaded here -->
-                <div class="placeholder">Loading Kanban Workflow...</div>
+            <div id="system" class="tab-content">
+                <div class="system-page">
+                    <header class="system-header">
+                        <h1>System Architecture</h1>
+                        <div class="system-subtabs">
+                            <button class="system-subtab-link active" data-subtab="structure">Structure</button>
+                            <button class="system-subtab-link" data-subtab="flow">Request Flow</button>
+                            <button class="system-subtab-link" data-subtab="kanban">Kanban Workflow</button>
+                        </div>
+                    </header>
+                    
+                    <section id="system-structure" class="system-subtab active">
+                        <div class="placeholder">Loading System Structure...</div>
+                    </section>
+                    
+                    <section id="system-flow" class="system-subtab">
+                        <div class="placeholder">Loading Request Flow...</div>
+                    </section>
+                    
+                    <section id="system-kanban" class="system-subtab">
+                        <div class="placeholder">Loading Kanban Workflow...</div>
+                    </section>
+                </div>
             </div>
         </main>
     </div>

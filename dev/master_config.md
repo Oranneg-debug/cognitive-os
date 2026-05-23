@@ -54,24 +54,15 @@ models:
     temperature: 0.7
     top_k: 40
     top_p: 0.9
-  # Vision-capable concept generator. Used by design_junior. Added 2026-05-21
-  # to stop the silent-fallback to defaults that the design meeting was hitting.
   zai-org/glm-4.6v-flash:
     context_window: 8192
     gpu_layers: -1
     max_tokens: 2048
-    repeat_penalty: 1.0
-    temperature: 1.0
+    repeat_penalty: 1
+    temperature: 1
     top_k: 40
     top_p: 0.95
     min_p: 0.1
-  # hermes-4.3-36b (Q6_K) removed 2026-05-21 — superseded by heretic-i1 (IQ4_XS)
-  # which is smaller, faster, slightly better PPL, and uncensored. The Q6 model
-  # file was deleted from disk. Past run records in council_memory/archived/
-  # still reference the old key; that's expected.
-  # IQ4_XS imatrix quant of the Heretic finetune. Verified 2026-05-21 to give
-  # 29.11 tok/s @ 65K, 27.40 @ 98K, both with pipeline parallelism enabled
-  # and f16 KV (max quality). Smaller weights + same KV = more headroom.
   hermes-4.3-36b-heretic-i1:
     context_window: 65536
     gpu_layers: -1
@@ -110,11 +101,12 @@ models:
   qwen3.5-35b-a3b-uncensored-hauhaucs-aggressive:
     context_window: 98304
     gpu_layers: -1
-    max_tokens: 16384
-    repeat_penalty: 1.1
-    temperature: 0.4
+    max_tokens: 2048
+    repeat_penalty: 1
+    temperature: 0.7
     top_k: 40
-    top_p: 0.9
+    top_p: 0.95
+    min_p: 0.1
   qwen3.5-9b-claude-4.6-highiq-instruct-heretic-uncensored:
     context_window: 262144
     gpu_layers: -1
@@ -135,10 +127,11 @@ models:
     context_window: 262144
     gpu_layers: -1
     max_tokens: 16384
-    repeat_penalty: 1.1
-    temperature: 0.4
+    repeat_penalty: 1
+    temperature: 0.7
     top_k: 40
-    top_p: 0.9
+    top_p: 0.95
+    min_p: 0.1
 model_presets:
 - id: qwen3-high-perf
   name: Qwen3 High-Perf (262k)
@@ -154,23 +147,27 @@ model_presets:
   gpu_layers: -1
 roles:
   simple:
-    model: hermes-4.3-36b-heretic-i1
+    model: deepseek-coder-v2-lite-instruct
     compass_weight: IGNORE
     system_prompt: "You are a fast, precise and very accurate assistant. Be concise.\nOutput ONLY valid JSON in this exact structure:\n{\n    \"response\": \"Your concise answer here.\",\n    \"action_taken\": \"Summary of action.\"\n}\n"
-    temperature: 1.1
+    temperature: 0.5
     top_p: 0.95
     top_k: 25
     repeat_penalty: 1
     min_p: 0.05
     max_tokens: 16000
-    # Switched 2026-05-21 from hermes-4.3-36b (Q6) -> heretic-i1 (IQ4_XS).
-    # 65K verified-stable ceiling at f16 KV + pipeline-parallel.
-    context_window: 65536
-    gpu_layers: -1
+    context_window: 260
+    gpu_layers: 0
+    enabled: true
+    n_parallel: 2
   standard:
     model: qwen3.5-9b-claude-4.6-highiq-instruct-heretic-uncensored
     compass_weight: IGNORE
     system_prompt: "You are an expert software engineer and technical architect. Provide high-quality, production-ready code and balanced technical analysis.\n# HANDOFF PROTOCOL\nOutput ONLY valid JSON:\n{\n    \"response\": \"Detailed analysis/code.\",\n    \"confidence\": 0.9,\n    \"requires_expertise\": false\n}\n"
+    context_window: 128000
+    max_tokens: 16000
+    reasoning_enabled: true
+    n_parallel: 2
   vision:
     model: qwen3-vl-4b-thinking
     compass_weight: IGNORE
@@ -181,19 +178,23 @@ roles:
     system_prompt: 'Distill the deliberation into a beautiful markdown report.
 
       '
-    temperature: 0.2
+    temperature: 0.1
     top_p: 0.9
     top_k: 40
     repeat_penalty: 1
     min_p: 0.1
-    max_tokens: 1310072
-    context_window: 256000
+    max_tokens: 15000
+    context_window: 131072
     gpu_layers: -1
+    n_parallel: 1
+    k_cache_quant: f16
+    v_cache_quant: f16
+    batch_size: 1023
   moderator:
-    model: ministral-3-3b-instruct-2512
+    model: deepseek-coder-v2-lite-instruct
     compass_weight: IGNORE
     system_prompt: "You are the Orchestrator Moderator \u2014 a neutral, efficient facilitator who ensures smooth role transitions.\n# HANDOFF PROTOCOL\nOutput ONLY valid JSON:\n{\n    \"next_role\": \"role_key\",\n    \"transition_reason\": \"Why this role is next.\",\n    \"context_summary\": \"Summary of current state.\"\n}\n"
-    gpu_layers: -1
+    gpu_layers: 0
     context_window: 131072
     max_tokens: 2048
     min_p: 0.1
@@ -201,8 +202,11 @@ roles:
     top_k: 40
     top_p: 0.9
     temperature: 0.6
+    n_parallel: 4
+    k_cache_quant: f16
+    v_cache_quant: f16
   brand_guard:
-    model: gemma-4-e4b-uncensored-hauhaucs-aggressive
+    model: deepseek-coder-v2-lite-instruct
     compass_weight: MAXIMUM WEIGHT
     system_prompt: "You are the Brand Integrity Enforcer \u2014 guardian of narrative coherence and strategic alignment.\n# HANDOFF PROTOCOL\nOutput ONLY valid JSON:\n{\n    \"approved\": true,\n    \"reasoning\": \"Brief explanation.\",\n    \"veto_points\": [\"reasons if any\"],\n    \"brand_risk_level\": \"low|medium|high\"\n}\n"
     temperature: 0.2
@@ -210,9 +214,10 @@ roles:
     top_k: 65
     repeat_penalty: 1.1
     min_p: 0.1
-    max_tokens: 2048
+    max_tokens: 4092
     context_window: 131072
-    gpu_layers: -1
+    gpu_layers: 0
+    n_parallel: 4
   nft_specialist:
     model: qwen3-coder-next
     compass_weight: HIGH WEIGHT
@@ -251,7 +256,7 @@ roles:
     repeat_penalty: 1.1
     min_p: 0.1
     max_tokens: 4048
-    context_window: 8092
+    context_window: 16384
     gpu_layers: -1
   dev_beta_council:
     model: qwen3.6-35b-a3b-uncensored-hauhaucs-aggressive
@@ -351,18 +356,21 @@ roles:
     model: hermes-4-70b
     compass_weight: MEDIUM WEIGHT
     system_prompt: "### SYSTEM ROLE: THE STRATEGIST (HERMES-4-70B)\nYou are the Executive Strategist / First Principles thinker of the \"Dark Maestro\" Boardroom.\n# HANDOFF PROTOCOL\nOutput ONLY valid JSON:\n{\n    \"strategic_view\": \"Your vision.\",\n    \"key_levers\": [\"list of levers\"],\n    \"veto_points\": [],\n    \"next_step\": \"Proposed path.\"\n}\n"
-    gpu_layers: 75
+    gpu_layers: 78
+    n_parallel: 1
     temperature: 0.3
     top_p: 0.95
     top_k: 30
     repeat_penalty: 1.1
     min_p: 0.1
     max_tokens: 8096
-    context_window: 131072
+    context_window: 65001
+    reasoning_enabled: true
   board_specialist:
     model: qwen3.6-27b-heretic-uncensored-finetune-neo-code-di-imatrix-max
     compass_weight: LOW WEIGHT
     system_prompt: "### SYSTEM ROLE: THE SPECIALIST (QWEN3.6-27B)\nYou are the Technical / Executor Specialist for the \"Dark Maestro\" Boardroom.\n# HANDOFF PROTOCOL\nOutput ONLY valid JSON:\n{\n    \"technical_analysis\": \"Precision detail.\",\n    \"actionable_steps\": [\"step 1\", \"step 2\"],\n    \"veto_points\": [],\n    \"next_step\": \"Refinement suggestion.\"\n}\n"
+    n_parallel: 2
     repeat_penalty: 1
     min_p: 0.05
     top_k: 22
@@ -371,43 +379,44 @@ roles:
     max_tokens: 8096
     context_window: 131072
     gpu_layers: -1
+    reasoning_enabled: true
+    k_cache_quant: f16
+    v_cache_quant: f16
   board_critic:
     model: deepseek-r1-distill-qwen-32b-uncensored
     compass_weight: IGNORE
     system_prompt: "### SYSTEM ROLE: THE CRITIC (DEEPSEEK-R1-32B)\nYou are the Ruthless Critic / Contrarian of the \"Dark Maestro\" Boardroom.\n# HANDOFF PROTOCOL\nOutput ONLY valid JSON:\n{\n    \"veto_points\": [{\"type\": \"logic|aesthetic|technical\", \"risk_level\": \"low|medium|high\", \"description\": \"...\"}],\n    \"critical_feedback\": \"Detailed breakdown.\",\n    \"next_step\": \"Mitigation request.\"\n}\n"
+    n_parallel: 2
     temperature: 0.2
     top_p: 0.95
     top_k: 45
     repeat_penalty: 1.1
     min_p: 0.05
     max_tokens: 4096
-    context_window: 131072
+    context_window: 65000
     gpu_layers: -1
+    reasoning_enabled: true
   board_creative:
-    # Upgraded 2026-05-21: hermes-4.3-36b (Q6_K) -> hermes-4.3-36b-heretic-i1 (IQ4_XS).
-    # Heretic = uncensored fine-tune; IQ4_XS = imatrix quant, smaller + slightly
-    # better PPL than Q4_K_M. Measured 29.11 client tok/s @ 65K context with
-    # pipeline-parallelism enabled (vs 17 tok/s on the prior Q6 setup). Frees
-    # ~9 GiB headroom so V/K stay f16 (max quality) for the Creative seat.
     model: hermes-4.3-36b-heretic-i1
     compass_weight: MAXIMUM WEIGHT
     system_prompt: "### SYSTEM ROLE: THE CREATIVE (HERMES-4.3-36B HERETIC)\nYou are the Creative Expansionist for the \"Dark Maestro\" Boardroom.\n# HANDOFF PROTOCOL\nOutput ONLY valid JSON:\n{\n    \"creative_vision\": \"Provocative idea.\",\n    \"style_notes\": \"Aesthetic cues.\",\n    \"veto_points\": [],\n    \"next_step\": \"Expansion.\"\n}\n"
+    n_parallel: 1
     temperature: 1.1
     top_p: 0.95
     top_k: 20
     repeat_penalty: 1
     min_p: 0.1
     max_tokens: 8192
-    # 65K is the verified-stable ceiling at f16 KV + pipeline-parallel on
-    # this dual-3090 box. 98K also fits but at lower throughput (27.4 tok/s).
-    context_window: 65536
+    context_window: 32001
     gpu_layers: -1
-    n_parallel: 1
     flash_attention: true
+    reasoning_enabled: true
+    batch_size: 1024
   board_logical:
     model: gemma-4-31b-it
     compass_weight: LOW WEIGHT
     system_prompt: "### SYSTEM ROLE: THE LOGICAL (GEMMA-4-31B)\nYou are the Formalist Outsider and Scribe.\n# HANDOFF PROTOCOL\nOutput ONLY valid JSON:\n{\n    \"logical_structure\": \"Step-by-step proof.\",\n    \"validity_score\": 1.0,\n    \"veto_points\": [],\n    \"next_step\": \"Decision point.\"\n}\n"
+    n_parallel: 2
     temperature: 0.3
     top_p: 0.95
     top_k: 65
@@ -416,10 +425,12 @@ roles:
     max_tokens: 4096
     context_window: 131072
     gpu_layers: -1
+    reasoning_enabled: true
   board_chairman:
     model: hermes-4-70b
     compass_weight: MAXIMUM WEIGHT
     system_prompt: "### SYSTEM ROLE: THE GOD-TIER CHAIRMAN (HERMES-4-70B)\nYou are the ultimate authority. Reconcile all inputs through the Sovereign Compass.\n# HANDOFF PROTOCOL\nOutput ONLY valid JSON:\n{\n    \"audit_report\": \"What was missed.\",\n    \"definitive_blueprint\": \"The path forward.\",\n    \"final_decision\": \"The verdict.\",\n    \"veto_points\": []\n}\n"
+    n_parallel: 1
     temperature: 0.6
     top_p: 0.9
     top_k: 30
@@ -428,6 +439,7 @@ roles:
     max_tokens: 4096
     context_window: 65536
     gpu_layers: 75
+    reasoning_enabled: true
   technical_specialist:
     model: qwen3.6-27b-heretic-uncensored-finetune-neo-code-di-imatrix-max
     compass_weight: LOW WEIGHT
@@ -440,6 +452,11 @@ roles:
     top_k: 40
     top_p: 0.95
     temperature: 0.2
+    reasoning_enabled: true
+    n_parallel: 1
+    batch_size: 1024
+    k_cache_quant: f16
+    v_cache_quant: f16
   technical_creative:
     model: hermes-4.3-36b-heretic-i1
     compass_weight: HIGH WEIGHT
@@ -450,20 +467,30 @@ roles:
     repeat_penalty: 1
     min_p: 0.1
     max_tokens: 8096
-    # Switched 2026-05-21 from hermes-4.3-36b (Q6) -> heretic-i1 (IQ4_XS).
-    context_window: 65536
+    context_window: 32002
     gpu_layers: -1
+    reasoning_enabled: true
+    n_parallel: 1
+    batch_size: 1024
   technical_critic:
     model: deepseek-r1-distill-qwen-32b-uncensored
     compass_weight: IGNORE
     system_prompt: "### SYSTEM ROLE: THE TECHNICAL CRITIC\nAs the critic in a technical meeting, focus on identifying potential failure points, performance bottlenecks, and logical inconsistencies in the proposed technical solution.\n# HANDOFF PROTOCOL\nOutput ONLY valid JSON:\n{\n    \"veto_points\": [{\"type\": \"technical\", \"risk_level\": \"low|medium|high\", \"description\": \"...\"}],\n    \"critical_feedback\": \"Detailed breakdown of technical risks.\",\n    \"next_step\": \"Mitigation request.\"\n}\n"
     top_k: 41
-    repeat_penalty: 0.9
+    repeat_penalty: 1.1
     min_p: 0.05
     top_p: 0.95
     temperature: 0.1
+    max_tokens: 4096
+    context_window: 131072
+    gpu_layers: -1
+    reasoning_enabled: true
+    n_parallel: 1
+    batch_size: 1024
+    k_cache_quant: f16
+    v_cache_quant: f16
   technical_overseer:
-    model: qwen3.5-35b-a3b-uncensored-hauhaucs-aggressive
+    model: gemma-4-31b-it
     compass_weight: LOW WEIGHT
     system_prompt: "### SYSTEM ROLE: THE TECHNICAL OVERSEERS\nAudit the technical logic. Reconcile Specialist and Creative inputs to produce a definitive, verified technical blueprint.\n# HANDOFF PROTOCOL\nOutput ONLY valid JSON:\n{\n    \"audit_report\": \"Technical gaps.\",\n    \"definitive_blueprint\": \"Verified logic.\",\n    \"veto_points\": []\n}\n"
     temperature: 0.4
@@ -474,7 +501,12 @@ roles:
     max_tokens: 8096
     context_window: 131072
     gpu_layers: -1
-    enabled: false
+    enabled: true
+    k_cache_quant: f16
+    v_cache_quant: f16
+    n_parallel: 1
+    reasoning_enabled: true
+    batch_size: 1024
   design_junior:
     model: zai-org/glm-4.6v-flash
     compass_weight: HIGH WEIGHT
@@ -487,6 +519,7 @@ roles:
     max_tokens: 2048
     context_window: 8192
     gpu_layers: -1
+    n_parallel: 1
   design_creative:
     model: hermes-4.3-36b-heretic-i1
     compass_weight: LOW WEIGHT
@@ -497,23 +530,33 @@ roles:
     repeat_penalty: 1
     min_p: 0.1
     max_tokens: 4096
-    # Switched 2026-05-21 from hermes-4.3-36b (Q6) -> heretic-i1 (IQ4_XS).
     context_window: 8192
   design_critic:
     model: deepseek-r1-distill-qwen-32b-uncensored
     compass_weight: HIGH WEIGHT
     system_prompt: "### SYSTEM ROLE: THE DESIGN CRITIC\nAs the critic in a design meeting, focus on identifying aesthetic weaknesses, narrative incoherence, and deviations from the brand philosophy.\n# HANDOFF PROTOCOL\nOutput ONLY valid JSON:\n{\n    \"veto_points\": [{\"type\": \"aesthetic\", \"risk_level\": \"low|medium|high\", \"description\": \"...\"}],\n    \"critical_feedback\": \"Detailed breakdown of design flaws.\",\n    \"next_step\": \"Refinement request.\"\n}\n"
-    enabled: false
+    enabled: true
+    temperature: 0.3
+    top_p: 0.9
+    top_k: 44
+    repeat_penalty: 1.1
+    min_p: 0.1
+    max_tokens: 2048
+    context_window: 32000
+    gpu_layers: -1
+    n_parallel: 1
   design_senior:
     model: qwen3.6-27b-heretic-uncensored-finetune-neo-code-di-imatrix-max
     compass_weight: MEDIUM WEIGHT
     system_prompt: "### SYSTEM ROLE: SENIOR ART DIRECTOR\nPerform the final synthesis of design concepts and engineer production-ready image prompts for Midjourney, Flux, and SDXL.\n# HANDOFF PROTOCOL\nOutput ONLY valid JSON:\n{\n    \"final_concepts\": [],\n    \"image_prompts\": {\"midjourney\": \"...\", \"flux\": \"...\", \"sdxl\": \"...\"},\n    \"social_media_strategy\": \"...\"\n}\n"
     temperature: 0.7
-    top_p: 0.9
+    top_p: 0.95
     top_k: 40
-    repeat_penalty: 0.9
+    repeat_penalty: 1
     min_p: 0.05
-    max_tokens: 4096
+    max_tokens: 8096
     context_window: 16384
     gpu_layers: -1
+    reasoning_enabled: true
+    batch_size: 1024
 ```

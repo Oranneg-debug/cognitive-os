@@ -2,8 +2,20 @@
 :: Navigate to the project directory
 cd /d "E:\Antigravity\cognitive-os"
 
-:: Start a background task to load the embedder and a default LLM after a short delay (gives the server time to start)
-start /B "" cmd /c "timeout /t 10 /nobreak >nul && echo Loading embedder... && lms load text-embedding-bge-m3 -y && echo Loading default LLM... && lms load ministral-3-3b-instruct-2512 -c 8192 -y"
+:: Start a background task to load the embedder and a default LLM after a short delay (gives the server time to start).
+::
+:: ministral-3-3b is used as moderator AND scribe AND brand-guard companion in the
+:: boardroom council. The scribe receives the full deliberation transcript (~10-14K
+:: tokens for typical proposals). Loading with -c 8192 caused 4 consecutive boardroom
+:: failures (2026-05-22 / 23) — every council with a real-sized proposal blew up at
+:: the scribe with n_keep > n_ctx, and the orchestrator wrote the error string as
+:: the "synthesis". See dev/decisions/_bootstrap_approvals_2026-05-22.md.
+::
+:: -c 32768  : fits any realistic council transcript with headroom (3B model on CPU,
+::             trivial RAM cost)
+:: --gpu off : pin to CPU per the VRAM-policy agreement (moderator/scribe/brand-guards
+::             must not eat VRAM that 70B reviewers need)
+start /B "" cmd /c "timeout /t 10 /nobreak >nul && echo Loading embedder on CPU... && lms load text-embedding-bge-m3 --gpu off -y && echo Loading default LLM at 32K ctx on CPU... && lms load ministral-3-3b-instruct-2512 -c 32768 --gpu off -y"
 
 :: Start all services in a single Windows Terminal window.
 :: The Ollama Bridge translates Ollama protocol -> LM Studio OpenAI server so

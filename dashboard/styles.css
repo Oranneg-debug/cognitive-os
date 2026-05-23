@@ -161,8 +161,32 @@ header {
 
 
 /* Form & Input Elements */
+.config-section {
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 1.5rem;
+    margin-bottom: 2rem;
+    background: linear-gradient(180deg, #0f0f0f 0%, #0a0a0a 100%);
+}
+
+.config-section legend {
+    padding: 0 0.5rem;
+    color: var(--highlight-color);
+    font-weight: 600;
+    font-size: 1.1rem;
+    font-family: Georgia, 'Times New Roman', Times, serif;
+}
+
 .form-group {
     margin-bottom: 1.5rem;
+}
+
+.form-help {
+    display: block;
+    color: #6e6e6e;
+    font-size: 0.85rem;
+    margin-top: 0.25rem;
+    font-style: italic;
 }
 
 .form-group label {
@@ -231,6 +255,13 @@ header {
     text-align: right;
 }
 
+/* Config Actions */
+.config-actions {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+}
+
 /* Save Button */
 .save-btn {
     padding: 10px 20px;
@@ -243,6 +274,24 @@ header {
     font-weight: bold;
     transition: background-color 0.2s, box-shadow 0.2s;
     text-shadow: 0 0 5px rgba(0,0,0,0.5);
+}
+
+/* Preset Buttons */
+.preset-btn {
+    padding: 8px 16px;
+    background-color: transparent;
+    color: var(--gold-color);
+    border: 1px solid var(--gold-color);
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 0.9em;
+    font-weight: 600;
+    transition: all 0.2s;
+}
+
+.preset-btn:hover {
+    background-color: rgba(201, 162, 39, 0.15);
+    box-shadow: 0 0 8px rgba(201, 162, 39, 0.3);
 }
 
 .save-btn:disabled {
@@ -460,11 +509,35 @@ header {
     border-radius: 8px;
     padding: 1rem 1.2rem;
 }
+.orch-output-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.6rem;
+}
 .orch-output h3 {
-    margin: 0 0 0.6rem;
+    margin: 0;
     font-size: 1rem;
     color: var(--highlight-color);
     letter-spacing: 0.04em;
+}
+.orch-log-controls {
+    display: flex;
+    gap: 0.5rem;
+}
+.log-btn {
+    padding: 0.3rem 0.8rem;
+    background: rgba(201, 162, 39, 0.1);
+    border: 1px solid var(--gold-color);
+    color: var(--gold-color);
+    border-radius: 3px;
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+.log-btn:hover {
+    background: rgba(201, 162, 39, 0.2);
+    transform: translateY(-1px);
 }
 .orch-meta {
     font-size: 0.8rem;
@@ -495,6 +568,314 @@ header {
     line-height: 1.5;
     margin: 0;
 }
+/* ===================================================================
+ * Home Tab - System Dashboard
+ * =================================================================== */
+.home-page {
+    padding: 1.5rem;
+    color: var(--text-color);
+}
+
+.home-page h1 {
+    margin: 0 0 1.5rem;
+    font-size: 2rem;
+    color: var(--text-color);
+    font-family: Georgia, 'Times New Roman', Times, serif;
+    text-shadow: 0 0 5px var(--highlight-color);
+}
+
+.status-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 1.5rem;
+    margin-bottom: 2rem;
+}
+
+.status-card {
+    background: linear-gradient(180deg, #131313 0%, #0e0e0e 100%);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 1.2rem;
+}
+
+.status-card h3 {
+    margin: 0 0 1rem;
+    color: var(--highlight-color);
+    font-size: 1.1rem;
+    font-weight: 600;
+    border-bottom: 1px solid var(--border-color);
+    padding-bottom: 0.5rem;
+}
+
+/* System Load Metrics */
+.metrics {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.metric {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+
+.metric label {
+    width: 60px;
+    font-size: 0.9rem;
+    color: #9a9a9a;
+}
+
+.metric-bar {
+    flex: 1;
+    height: 24px;
+    background: var(--input-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    position: relative;
+    overflow: hidden;
+}
+
+.metric-fill {
+    height: 100%;
+    transition: width 0.5s ease;
+    position: absolute;
+    left: 0;
+    top: 0;
+}
+
+.cpu-fill {
+    background: linear-gradient(90deg, #3a7a3a 0%, #5a9a5a 100%);
+}
+
+.ram-fill {
+    background: linear-gradient(90deg, #3a5a8a 0%, #5a7aaa 100%);
+}
+
+.gpu-fill {
+    background: linear-gradient(90deg, #8a5a3a 0%, #aa7a5a 100%);
+}
+
+.vram-fill {
+    background: linear-gradient(90deg, #d2691e 0%, #ff8c00 100%);
+}
+
+.metric-text {
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 0.85rem;
+    color: var(--text-color);
+    font-weight: 600;
+}
+
+/* Model Status List */
+.model-list {
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.model-item {
+    padding: 0.5rem;
+    border-bottom: 1px solid #1f1f1f;
+    font-size: 0.9rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.model-item:last-child {
+    border-bottom: none;
+}
+
+.model-item .model-name {
+    color: var(--success-color);
+    font-family: monospace;
+}
+
+.model-item .model-context {
+    color: #6e6e6e;
+    font-size: 0.8rem;
+}
+
+/* Empty Seats List */
+.empty-seats-list {
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.empty-seat {
+    padding: 0.5rem;
+    border-left: 3px solid var(--highlight-color);
+    margin-bottom: 0.5rem;
+    background: rgba(196, 30, 58, 0.1);
+    font-size: 0.9rem;
+}
+
+.empty-seat .role-name {
+    color: var(--highlight-color);
+    font-weight: 600;
+}
+
+.empty-seat .reason {
+    color: #9a9a9a;
+    font-size: 0.85rem;
+    margin-left: 1rem;
+}
+
+/* Quick Actions */
+.quick-actions {
+    margin: 2rem 0;
+}
+
+.quick-actions h2 {
+    color: var(--text-color);
+    font-size: 1.3rem;
+    margin-bottom: 1rem;
+    border-bottom: 1px solid var(--border-color);
+    padding-bottom: 0.5rem;
+}
+
+.action-buttons {
+    display: flex;
+    gap: 1rem;
+    flex-wrap: wrap;
+}
+
+.action-btn {
+    padding: 0.8rem 1.5rem;
+    background: var(--button-bg);
+    color: var(--button-text);
+    border: 1px solid var(--highlight-color);
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 1rem;
+    font-weight: 600;
+    transition: all 0.2s;
+}
+
+.action-btn:hover {
+    background: var(--highlight-color);
+    box-shadow: 0 0 10px var(--highlight-color);
+    transform: translateY(-2px);
+}
+
+/* Recent Activity */
+.recent-activity h2 {
+    color: var(--text-color);
+    font-size: 1.3rem;
+    margin-bottom: 1rem;
+    border-bottom: 1px solid var(--border-color);
+    padding-bottom: 0.5rem;
+}
+
+.recent-list {
+    background: var(--input-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 5px;
+    padding: 1rem;
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+.recent-item {
+    padding: 0.8rem;
+    border-bottom: 1px solid #1f1f1f;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.recent-item:last-child {
+    border-bottom: none;
+}
+
+.recent-item .pattern {
+    color: var(--success-color);
+    font-size: 0.9rem;
+}
+
+.recent-item .time {
+    color: #6e6e6e;
+    font-size: 0.85rem;
+}
+
+/* Empty Seat Badge for Sidebar */
+.empty-seat-badge {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    background: var(--highlight-color);
+    border-radius: 50%;
+    margin-left: 5px;
+    animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+    0% { opacity: 1; }
+    50% { opacity: 0.5; }
+    100% { opacity: 1; }
+}
+
+/* System Tab Styles */
+.system-page {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+}
+
+.system-header {
+    padding: 1rem 1.5rem;
+    border-bottom: 1px solid var(--border-color);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.system-header h1 {
+    margin: 0;
+    color: var(--text-color);
+    font-size: 1.5rem;
+}
+
+.system-subtabs {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.system-subtab-link {
+    padding: 0.5rem 1rem;
+    background: transparent;
+    border: 1px solid var(--border-color);
+    color: var(--text-color);
+    cursor: pointer;
+    border-radius: 4px;
+    transition: all 0.2s;
+}
+
+.system-subtab-link:hover {
+    border-color: var(--highlight-color);
+    color: var(--highlight-color);
+}
+
+.system-subtab-link.active {
+    background: var(--highlight-color);
+    color: var(--button-text);
+    border-color: var(--highlight-color);
+}
+
+.system-subtab {
+    display: none;
+    flex: 1;
+    padding: 1.5rem;
+    overflow: auto;
+}
+
+.system-subtab.active {
+    display: block;
+}
+
 /* ===================================================================
  * LM Studio tab — Dark Maestro "Instrument Readout"
  * Monochrome on onyx, single gold accent (#c9a227), Iosevka Mono,
@@ -999,3 +1380,136 @@ header {
 .lms-log-panel .lms-log-warn { color: #c89a3a; }
 .lms-log-panel .lms-log-err  { color: #c41e3a; }
 .lms-log-panel em            { color: var(--lms-ink-dim); }
+/* Add Item Buttons */
+.add-item-btn, .add-role-category-btn {
+    width: calc(100% - 20px);
+    margin: 10px;
+    padding: 8px;
+    background: rgba(201, 162, 39, 0.1);
+    border: 1px solid var(--gold-color);
+    color: var(--gold-color);
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.9rem;
+    transition: all 0.3s ease;
+}
+
+.add-role-category-btn {
+    margin: 5px 10px 15px;
+    font-size: 0.8rem;
+    padding: 6px;
+}
+
+.add-item-btn:hover, .add-role-category-btn:hover {
+    background: rgba(201, 162, 39, 0.2);
+    transform: translateY(-1px);
+}
+
+.delete-role-btn {
+    float: right;
+    background: transparent;
+    border: none;
+    color: var(--crimson-color);
+    font-size: 1.2rem;
+    cursor: pointer;
+    padding: 0 5px;
+    opacity: 0;
+    transition: opacity 0.2s;
+}
+
+.sidebar li:hover .delete-role-btn {
+    opacity: 1;
+}
+
+.delete-role-btn:hover {
+    color: #ff4444;
+    transform: scale(1.2);
+}
+/* Two-column layout for orchestrations */
+.orch-layout {
+    display: grid;
+    grid-template-columns: 1fr 400px;
+    gap: 2rem;
+    margin-top: 2rem;
+}
+
+.orch-main-column {
+    min-width: 0;
+}
+
+.orch-side-column {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+    position: sticky;
+    top: 2rem;
+    max-height: calc(100vh - 4rem);
+    overflow-y: auto;
+}
+
+.orch-side-column .status-card {
+    margin: 0;
+}
+
+.orch-output {
+    padding: 1.5rem;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--black);
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 300px;
+    margin-top: 0;
+}
+
+/* Model Defaults Window in LM Studio */
+.lms-model-defaults {
+    margin-top: 1.5rem;
+    padding: 1rem;
+    background: var(--lms-black);
+    border: 1px solid var(--lms-line);
+    border-radius: 4px;
+}
+
+.lms-model-defaults h4 {
+    color: var(--lms-gold);
+    margin: 0 0 1rem 0;
+    font-size: 0.9rem;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    font-weight: 400;
+}
+
+.model-defaults-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 0.75rem;
+    font-size: 0.82rem;
+}
+
+.model-default-item {
+    padding: 0.5rem;
+    background: rgba(0, 0, 0, 0.4);
+    border: 1px solid var(--lms-line);
+    border-radius: 2px;
+}
+
+.model-default-item label {
+    color: var(--lms-gold-dim);
+    display: block;
+    margin-bottom: 0.25rem;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.model-default-item .value {
+    color: var(--lms-ink);
+    font-family: 'Consolas', 'Monaco', monospace;
+    font-size: 0.9rem;
+}
+
+.model-default-item .value.highlight {
+    color: var(--lms-gold);
+}
