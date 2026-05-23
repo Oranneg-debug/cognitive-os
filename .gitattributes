@@ -1,0 +1,48 @@
+# ════════════════════════════════════════════════════════════════════
+#  Line-ending policy
+#  ────────────────────────────────────────────────────────────────────
+#  Backend (Windows) and vault (Obsidian / CloudStation, LF-native)
+#  share proposal + handoff + decision files via proposal_sync.
+#  If git keeps converting LF → CRLF on checkout, every commit
+#  re-introduces drift the sync health-check flags as conflicts
+#  (the bug observed on 2026-05-24 that blocked the kanban watcher).
+#
+#  Fix: force LF for all text that crosses the backend/vault boundary.
+# ════════════════════════════════════════════════════════════════════
+
+# All text files: normalize to LF on commit, do NOT convert back to CRLF
+# on checkout. This means new clones on Windows ALSO get LF.
+* text=auto eol=lf
+
+# Markdown — proposals, handoffs, decisions, runbooks: explicitly LF
+# (these are the ones that cross the backend/vault boundary)
+*.md text eol=lf
+*.markdown text eol=lf
+
+# YAML configs — read by both Python and ruamel.yaml on both ends
+*.yaml text eol=lf
+*.yml text eol=lf
+
+# JSON — golden fixtures, schemas
+*.json text eol=lf
+
+# Python sources
+*.py text eol=lf
+
+# Shell + batch — Windows batch needs CRLF, *nix shell needs LF
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+*.sh text eol=lf
+
+# Binary files — git should never touch
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.pdf binary
+*.zip binary
+*.gguf binary
+*.sqlite binary
+*.db binary

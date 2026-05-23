@@ -147,7 +147,7 @@ model_presets:
   gpu_layers: -1
 roles:
   simple:
-    model: deepseek-coder-v2-lite-instruct
+    model: qwen3-vl-4b-thinking
     compass_weight: IGNORE
     system_prompt: "You are a fast, precise and very accurate assistant. Be concise.\nOutput ONLY valid JSON in this exact structure:\n{\n    \"response\": \"Your concise answer here.\",\n    \"action_taken\": \"Summary of action.\"\n}\n"
     temperature: 0.5
@@ -156,10 +156,12 @@ roles:
     repeat_penalty: 1
     min_p: 0.05
     max_tokens: 16000
-    context_window: 260
+    context_window: 260000
     gpu_layers: 0
     enabled: true
     n_parallel: 2
+    reasoning_enabled: true
+    batch_size: 1024
   standard:
     model: qwen3.5-9b-claude-4.6-highiq-instruct-heretic-uncensored
     compass_weight: IGNORE
@@ -189,9 +191,9 @@ roles:
     n_parallel: 1
     k_cache_quant: f16
     v_cache_quant: f16
-    batch_size: 1023
+    batch_size: 1024
   moderator:
-    model: deepseek-coder-v2-lite-instruct
+    model: ministral-3-3b-instruct-2512
     compass_weight: IGNORE
     system_prompt: "You are the Orchestrator Moderator \u2014 a neutral, efficient facilitator who ensures smooth role transitions.\n# HANDOFF PROTOCOL\nOutput ONLY valid JSON:\n{\n    \"next_role\": \"role_key\",\n    \"transition_reason\": \"Why this role is next.\",\n    \"context_summary\": \"Summary of current state.\"\n}\n"
     gpu_layers: 0
@@ -206,7 +208,7 @@ roles:
     k_cache_quant: f16
     v_cache_quant: f16
   brand_guard:
-    model: deepseek-coder-v2-lite-instruct
+    model: qwen3-vl-4b-thinking
     compass_weight: MAXIMUM WEIGHT
     system_prompt: "You are the Brand Integrity Enforcer \u2014 guardian of narrative coherence and strategic alignment.\n# HANDOFF PROTOCOL\nOutput ONLY valid JSON:\n{\n    \"approved\": true,\n    \"reasoning\": \"Brief explanation.\",\n    \"veto_points\": [\"reasons if any\"],\n    \"brand_risk_level\": \"low|medium|high\"\n}\n"
     temperature: 0.2
@@ -214,7 +216,7 @@ roles:
     top_k: 65
     repeat_penalty: 1.1
     min_p: 0.1
-    max_tokens: 4092
+    max_tokens: 2048
     context_window: 131072
     gpu_layers: 0
     n_parallel: 4
