@@ -71,6 +71,8 @@ class ApprovalLogger:
         conn = sqlite3.connect(str(self.db_path))
         try:
             cursor = conn.cursor()
+            
+            # Main decisions table (existing)
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS decisions (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -88,6 +90,24 @@ class ApprovalLogger:
                 CREATE INDEX IF NOT EXISTS idx_decisions_proposal_id 
                 ON decisions(proposal_id)
             """)
+            
+            # approval_log table for Gate #3 queries (T4: composite index)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS approval_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    proposal_id TEXT NOT NULL,
+                    role TEXT NOT NULL,
+                    decision TEXT NOT NULL,
+                    approver TEXT NOT NULL,
+                    ts TEXT NOT NULL
+                )
+            """)
+            # T4: Composite index for O(log N) Gate #3 queries
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_approval_log_composite 
+                ON approval_log(proposal_id, role, decision, ts)
+            """)
+            
             conn.commit()
         finally:
             conn.close()
@@ -296,6 +316,58 @@ Prior Record Hash: {prior_hash or 'N/A'}
         if not records:
             return None
         return records[-1].state_hash
+    
+    def check_technical_consensus(self, proposal_id: str) -> int:
+        """
+        Check Gate #3: Technical consensus from 3 distinct roles in last 14 days.
+        
+        V5 COMPLIANCE: Uses structured SQLite query, NOT markdown parsing
+        T4 COMPLIANCE: Uses composite index on (proposal_id, role, decision, ts)
+        
+        Args:
+            proposal_id: The proposal ID to check
+            
+        Returns:
+            Count of distinct roles that have approved in last 14 days
+        """
+        conn = sqlite3.connect(str(self.db_path))
+        try:
+            cursor = conn.cursor()
+            # Gate #3 SQL query (from state_machine.yaml)
+            cursor.execute("""
+                SELECT COUNT(DISTINCT role) 
+                FROM approval_log 
+                WHERE proposal_id = ? 
+                  AND decision = 'APPROVED' 
+                  AND role IN ('analyst', 'architect', 'specialist') 
+                  AND ts > datetime('now', '-14 days')
+            """, (proposal_id,))
+            
+            result = cursor.fetchone()
+            return result[0] if result else 0
+        finally:
+            conn.close()
+    
+    def log_approval_for_gate3(self, proposal_id: str, role: str, decision: str, approver: str) -> None:
+        """
+        Log an approval record for Gate #3 queries.
+        
+        Args:
+            proposal_id: The proposal ID
+            role: The role (analyst, architect, specialist)
+            decision: APPROVED or REJECTED
+            approver: Name of the approver
+        """
+        conn = sqlite3.connect(str(self.db_path))
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO approval_log (proposal_id, role, decision, approver, ts)
+                VALUES (?, ?, ?, ?, datetime('now'))
+            """, (proposal_id, role, decision, approver))
+            conn.commit()
+        finally:
+            conn.close()
 
 
 def verify_approval_logs_integrity(logger: Optional[ApprovalLogger] = None) -> Dict[str, bool]:

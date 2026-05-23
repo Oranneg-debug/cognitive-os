@@ -1,0 +1,210 @@
+# State Machine Configuration for Phase 3+4 Workflow Execution
+# 
+# Defines phases, transitions, and gate specifications for proposal lifecycle.
+# This file is the source of truth for phase transitions.
+
+# ════════════════════════════════════════════════════════════════════
+#  PHASE DEFINITIONS
+# ────────────────────────────────────────────────────────────────────
+
+phases:
+  backlog:
+    order: 0
+    description: "Initial idea backlog"
+    substatus: null
+  
+  proposal:
+    order: 1
+    description: "Proposal under review"
+    substatus: null
+  
+  beta_testing:
+    order: 2
+    description: "Beta testing phase with planning/execution split"
+    substatus:
+      - planning      # Pre-execution planning
+      - coding        # Active coding
+      - debugging     # Bug fixing
+      - testing       # Test writing/validation
+      - ready-for-alpha  # Ready for alpha review
+  
+  alpha:
+    order: 3
+    description: "Alpha polish and refinement"
+    substatus: null
+  
+  finalized:
+    order: 4
+    description: "Release finalized"
+    substatus: null
+  
+  deployed:
+    order: 5
+    description: "Deployed to production"
+    substatus: null
+
+# ════════════════════════════════════════════════════════════════════
+#  TRANSITION DEFINITIONS
+# ────────────────────────────────────────────────────────────────────
+
+transitions:
+  # Forward transitions (no gate required)
+  - from: backlog
+    to: proposal
+    gate: null
+  
+  - from: proposal
+    to: beta_testing/planning
+    gate: null
+  
+  - from: beta_testing/planning
+    to: beta_testing/execution
+    gate: phase34_gate3  # Hard gate: technical consensus
+  
+  - from: beta_testing/execution
+    to: alpha
+    gate: null
+  
+  - from: alpha
+    to: finalized
+    gate: null
+  
+  - from: finalized
+    to: deployed
+    gate: null
+  
+  # Backward/rejection transitions (for rollback scenarios)
+  - from: proposal
+    to: backlog
+    gate: null
+    reason: "Rejection from proposal phase"
+  
+  - from: beta_testing/planning
+    to: proposal
+    gate: null
+    reason: "Rejection from beta planning"
+  
+  - from: beta_testing/execution
+    to: beta_testing/planning
+    gate: null
+    reason: "Rejection from beta execution"
+  
+  - from: alpha
+    to: beta_testing/planning
+    gate: null
+    reason: "Rejection from alpha polish"
+  
+  # Terminal state (deployed has no outgoing transitions)
+
+# ════════════════════════════════════════════════════════════════════
+#  GATE SPECIFICATIONS
+# ────────────────────────────────────────────────────────────────────
+
+gates:
+  # Gate #3: Technical Consensus (planning → execution)
+  - id: phase34_gate3
+    name: technical_consensus
+    description: >
+      Verify that 3 distinct roles (analyst, architect, specialist) have
+      approved the proposal within the last 14 days.
+    
+    # V5 COMPLIANCE: Uses structured SQLite query, NOT markdown parsing
+    sql_query: |
+      SELECT COUNT(DISTINCT role) as cnt 
+      FROM approval_log 
+      WHERE proposal_id = ? 
+        AND decision = 'APPROVED' 
+        AND role IN ('analyst', 'architect', 'specialist') 
+        AND ts > datetime('now', '-14 days')
+    
+    threshold: 3
+    failure_message: >
+      Missing technical consensus. Requires 3 distinct approvals from 
+      analyst/architect/specialist roles within the last 14 days.
+    
+    # Semantic keys used for version_hash computation (T2 compliance)
+    # These keys are EXCLUDED from volatile metadata like last_modified
+    semantic_keys:
+      - phase
+      - status
+      - substatus
+      - approver
+      - severity
+      - depends_on
+
+# ════════════════════════════════════════════════════════════════════
+#  STATE TRANSITION VALIDATION RULES
+# ────────────────────────────────────────────────────────────────────
+
+validation_rules:
+  # Forward progress only (except for explicit rejection transitions)
+  - rule: no_backward_skip
+    description: >
+      Cannot skip phases without going through intermediate states.
+      Exception: Backlog → Proposal is allowed.
+  
+  # Phase-specific rules
+  - rule: beta_substatus_required
+    description: >
+      When entering beta_testing phase, substatus must be specified
+      (planning or execution.coding/debugging/testing/ready-for-alpha).
+  
+  - rule: execution_requires_gate3
+    description: >
+      Transition from beta_testing/planning to beta_testing/execution
+      requires passing phase34_gate3 (technical consensus).
+
+# ════════════════════════════════════════════════════════════════════
+#  VERSION HASH COMPUTATION SPECIFICATION
+# ────────────────────────────────────────────────────────────────────
+
+version_hash:
+  # Fields included in version_hash (T2 compliance)
+  include:
+    - phase
+    - status
+    - substatus
+    - approver
+    - severity
+    - depends_on
+  
+  # Fields EXCLUDED from version_hash (volatile metadata)
+  exclude:
+    - last_modified
+    - updated_ts
+    - created_at
+    - timestamp
+    - workflow_version
+
+# ════════════════════════════════════════════════════════════════════
+#  SAGA PATTERN CONFIGURATION
+# ────────────────────────────────────────────────────────────────────
+
+saga_steps:
+  - name: snapshot_prior_state
+    description: "Create immutable snapshot of prior proposal state"
+    compensate: mark_snapshot_superseded
+  
+  - name: verify_version_hash
+    description: "Verify version_hash matches current YAML (optimistic concurrency)"
+    compensate: null  # No compensation needed if this fails
+  
+  - name: ensure_proposal_branch
+    description: "Ensure feat/proposal-{id} branch exists"
+    compensate: delete_branch
+  
+  - name: create_execution_tag
+    description: "Create exec-start/<proposal_id> tag for rollback point"
+    compensate: delete_tag
+  
+  - name: write_yaml_update
+    description: "Write updated phase/substatus to proposal YAML file"
+    compensate: restore_from_snapshot
+  
+  - name: log_decision
+    description: "Log decision to approval_log SQLite table"
+    compensate: remove_decision_entry
+
+# ════════════════════════════════════════════════════════════════════
+#  END OF CONFIGURATION
+# ════════════════════════════════════════════════════════════════════
