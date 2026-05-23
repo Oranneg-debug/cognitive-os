@@ -1,0 +1,10 @@
+{
+  "rule_name": "council_decision",
+  "destination": "decisions",
+  "workflow_phase": "beta",
+  "severity": "HIGH",
+  "matched_markers": ["#decision"],
+  "context": {
+    "severity": "HIGH"
+  }
+}

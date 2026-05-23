@@ -1,0 +1,4 @@
+# Dead-letter directory for OutputRouter (E5 of ARCH-2007E0A1).
+# Files that fail to write to their primary destination land here with
+# a .failed.md + .sidecar.json pair. The directory itself is tracked
+# so the destination exists on a fresh clone.

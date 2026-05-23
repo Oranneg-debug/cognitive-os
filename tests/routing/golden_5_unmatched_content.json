@@ -1,0 +1,10 @@
+{
+  "rule_name": "decision_only",
+  "destination": "decisions",
+  "workflow_phase": "beta",
+  "severity": "BACKLOG",
+  "matched_markers": [],
+  "context": {
+    "severity": "BACKLOG"
+  }
+}
