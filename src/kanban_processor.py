@@ -720,9 +720,21 @@ class KanbanProcessor:
             with open(proposal_file, "r", encoding="utf-8") as f:
                 content = f.read()
             updated_content = self._update_yaml_frontmatter(content, {"status": processing_status})
-            with open(proposal_file, "w", encoding="utf-8") as f:
+            with open(proposal_file, "w", encoding="utf-8", newline='') as f:
                 f.write(updated_content)
             print(f"[PROC STATUS] Set status={processing_status} in {proposal_file}")
+
+            # Mirror to the backend twin so proposal_sync stays GREEN.
+            # See _backend_twin_path docstring + commit d7e2b3f.
+            try:
+                backend_twin = self._backend_twin_path(proposal_file)
+                if backend_twin and os.path.exists(os.path.dirname(backend_twin)):
+                    with open(backend_twin, "w", encoding="utf-8", newline='') as f:
+                        f.write(updated_content)
+                    print(f"[PROC STATUS] Mirrored to backend: {backend_twin}")
+            except Exception as twin_err:
+                print(f"[PROC STATUS WARN] Backend twin mirror failed: {twin_err}")
+
             return True
         except Exception as e:
             print(f"[PROC STATUS ERROR] {e}")
@@ -872,9 +884,18 @@ IMPORTANT INSTRUCTIONS:
             )
 
             if rewritten_content:
-                with open(proposal_file, 'w', encoding='utf-8') as f:
+                with open(proposal_file, 'w', encoding='utf-8', newline='') as f:
                     f.write(rewritten_content)
                 print(f"[REFINE] Proposal rewritten successfully for {proposal_id}")
+                # Mirror to backend twin (Phase 5 stopgap — see d7e2b3f)
+                try:
+                    backend_twin = self._backend_twin_path(proposal_file)
+                    if backend_twin and os.path.exists(os.path.dirname(backend_twin)):
+                        with open(backend_twin, 'w', encoding='utf-8', newline='') as f:
+                            f.write(rewritten_content)
+                        print(f"[REFINE] Mirrored to backend: {backend_twin}")
+                except Exception as twin_err:
+                    print(f"[REFINE WARN] Backend twin mirror failed: {twin_err}")
                 # LLM appended a User Notes review gate — user must check it before
                 # moving on, so the processing state becomes 'review'.
                 self._set_proposal_processing_status(proposal_file, "review")
