@@ -228,22 +228,30 @@ def migrate_legacy(path: str) -> bool:
         
         # Write back only if changes were made
         if changed:
-            # Reconstruct frontmatter
-            output_lines = ["---"]
-            yaml.dump(data, output_lines)  # type: ignore
-            output_lines.append("---")
-            output_lines.append(body)
-            
+            # Reconstruct frontmatter via StringIO (ruamel needs a stream
+            # with write(), not a list).
+            from io import StringIO
+            yaml_buf = StringIO()
+            yaml.dump(data, yaml_buf)
+            yaml_text = yaml_buf.getvalue().rstrip("\n")
+            new_text = f"---\n{yaml_text}\n---\n{body}"
+
             # Atomic write with fsync
             temp_path = path + ".tmp"
-            with open(temp_path, "w", encoding="utf-8") as f:
-                f.write("\n".join(output_lines))
+            with open(temp_path, "w", encoding="utf-8", newline="") as f:
+                f.write(new_text)
                 f.flush()
                 os.fsync(f.fileno())
-            
+
             os.replace(temp_path, path)
-            os.fsync(os.path.dirname(path))
-            
+            # fsync the directory on POSIX; Windows doesn't support dir fsync.
+            if os.name != "nt":
+                dir_fd = os.open(os.path.dirname(path) or ".", os.O_RDONLY)
+                try:
+                    os.fsync(dir_fd)
+                finally:
+                    os.close(dir_fd)
+
         return changed
         
     except Exception as e:
@@ -254,17 +262,21 @@ def migrate_legacy(path: str) -> bool:
         ) from e
 
 
-def run_migration() -> dict:
+def run_migration(proposals_dir: Optional[Path] = None) -> dict:
     """
     Scan all proposals for missing fields and migrate them.
-    
+
     Idempotent: running twice produces zero diff on second run.
-    
+
+    Args:
+        proposals_dir: Optional directory to scan. Defaults to
+            ``dev/proposals`` (production). Pass a different path in tests.
+
     Returns:
         Migration report with counts
     """
-    proposals_dir = Path("dev/proposals")
-    
+    proposals_dir = Path(proposals_dir) if proposals_dir else Path("dev/proposals")
+
     if not proposals_dir.exists():
         return {
             "total": 0,
@@ -272,7 +284,7 @@ def run_migration() -> dict:
             "errors": [],
             "already_up_to_date": 0
         }
-    
+
     md_files = glob.glob(str(proposals_dir / "*.md"))
     
     migrated = 0

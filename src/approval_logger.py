@@ -37,10 +37,28 @@ class ApprovalLogger:
     - B4: Cryptographic chain-of-custody via SHA256 + nonces
     """
     
-    def __init__(self, decisions_dir: Optional[Path] = None):
-        """Initialize the logger with optional custom directory."""
+    def __init__(
+        self,
+        decisions_dir: Optional[Path] = None,
+        db_path: Optional[Path] = None,
+    ):
+        """Initialize the logger.
+
+        Args:
+            decisions_dir: Where decision Markdown files live. Defaults to
+                production ``dev/decisions``.
+            db_path: Where the SQLite index lives. Defaults to a sibling
+                ``index.sqlite`` next to ``decisions_dir`` so that passing
+                only ``decisions_dir`` (e.g. in tests) isolates BOTH the
+                files AND the index from production state.
+        """
         self.decisions_dir = decisions_dir or DECISIONS_DIR
-        self.db_path = DB_PATH
+        if db_path is not None:
+            self.db_path = db_path
+        elif decisions_dir is not None:
+            self.db_path = self.decisions_dir / "index.sqlite"
+        else:
+            self.db_path = DB_PATH
         self._ensure_directory_exists()
         self._ensure_database_exists()
     
@@ -195,44 +213,81 @@ Prior Record Hash: {prior_hash or 'N/A'}
     def verify_chain(self, proposal_id: str) -> bool:
         """
         Verify the integrity of the decision log chain.
-        
+
         VETO COMPLIANCE:
         - B4: Cryptographic chain-of-custody verification
-        
+
+        Checks three invariants:
+
+        1. The Markdown log file exists and contains the SQLite-recorded
+           nonces. If the file is missing or has been overwritten with
+           content that does not include every nonce, the chain is
+           considered corrupted.
+        2. Every record's ``state_hash`` matches the deterministic hash
+           computed from its (proposal_id, approver, decision) tuple.
+        3. The hash chain links via ``prior_record_hash``.
+
         Args:
             proposal_id: The proposal ID to verify
-            
+
         Returns:
             True if chain is valid, False otherwise
+
+        Raises:
+            VaultIntegrityError: when a corruption is detected.
         """
         records = self.get_log(proposal_id)
-        
+
         if not records:
             return False
-        
-        # Verify each record's hash matches
+
+        # 1. Cross-check the SQLite records against the Markdown source-of-truth.
+        log_path = self.decisions_dir / f"{proposal_id}_log.md"
+        if not log_path.exists():
+            raise VaultIntegrityError(
+                proposal_id=proposal_id,
+                reason=f"Decision log missing: {log_path}",
+            )
+        try:
+            log_text = log_path.read_text(encoding="utf-8")
+        except OSError as e:
+            raise VaultIntegrityError(
+                proposal_id=proposal_id,
+                reason=f"Decision log unreadable: {e}",
+            ) from e
+        for i, record in enumerate(records):
+            if record.nonce and record.nonce not in log_text:
+                raise VaultIntegrityError(
+                    proposal_id=proposal_id,
+                    reason=(
+                        f"Decision log corrupted: nonce for record {i} "
+                        f"missing from {log_path.name}"
+                    ),
+                )
+
+        # 2. Verify each record's hash matches its content.
         for i, record in enumerate(records):
             expected_hash = hashlib.sha256(
                 f"{record.proposal_id}:{record.approver}:{record.decision}".encode()
             ).hexdigest()
-            
+
             if record.state_hash != expected_hash:
                 raise VaultIntegrityError(
                     proposal_id=proposal_id,
-                    reason=f"Hash mismatch at record {i}"
+                    reason=f"Hash mismatch at record {i}",
                 )
-        
-        # Verify hash chain integrity
+
+        # 3. Verify hash chain links.
         for i in range(1, len(records)):
             current = records[i]
             previous = records[i - 1]
-            
+
             if current.prior_record_hash != previous.state_hash:
                 raise VaultIntegrityError(
                     proposal_id=proposal_id,
-                    reason=f"Hash chain broken at record {i}"
+                    reason=f"Hash chain broken at record {i}",
                 )
-        
+
         return True
     
     def _get_prior_hash(self, proposal_id: str) -> Optional[str]:

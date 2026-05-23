@@ -40,10 +40,29 @@ class HandoffVault:
     - B4: Hash chain via prior_hash
     """
     
-    def __init__(self, base_dir: Optional[Path] = None):
-        """Initialize the vault with optional custom base directory."""
+    def __init__(
+        self,
+        base_dir: Optional[Path] = None,
+        db_path: Optional[Path] = None,
+    ):
+        """Initialize the vault.
+
+        Args:
+            base_dir: Where snapshot files live. Defaults to production
+                ``dev/.archives``.
+            db_path: Where the SQLite index lives. Defaults to a sibling
+                ``vault_index.sqlite`` next to ``base_dir`` so that passing
+                only ``base_dir`` (e.g. in tests) isolates BOTH the files
+                AND the index from production state.
+        """
         self.base_dir = base_dir or ARCHIVES_DIR
-        self.db_path = DB_PATH
+        if db_path is not None:
+            self.db_path = db_path
+        elif base_dir is not None:
+            # Custom base_dir → derive db_path so tests are fully isolated
+            self.db_path = self.base_dir / "vault_index.sqlite"
+        else:
+            self.db_path = DB_PATH
         self._ensure_directory_exists()
         self._ensure_database_exists()
     
@@ -90,19 +109,22 @@ class HandoffVault:
         Returns:
             ArtifactVersion with metadata (not full body)
         """
-        # Compute SHA256 of the full proposal body
-        sha256 = hashlib.sha256(proposal.body.encode("utf-8")).hexdigest()
-        
+        # Compute SHA256 of the full proposal body (UTF-8 bytes, no
+        # line-ending translation — so the on-disk file hashes identically).
+        body_bytes = proposal.body.encode("utf-8")
+        sha256 = hashlib.sha256(body_bytes).hexdigest()
+
         # Create archive filename from hash
         archive_filename = f"{proposal.proposal_id}_{sha256[:16]}.md"
         archive_path = self.base_dir / archive_filename
-        
-        # Write to temp file first (atomic write pattern)
+
+        # Write to temp file first (atomic write pattern). Binary mode so
+        # Windows does not silently convert \n -> \r\n and break the hash.
         temp_path = archive_path.with_suffix(".tmp")
-        
+
         try:
-            with open(temp_path, "w", encoding="utf-8") as f:
-                f.write(proposal.body)
+            with open(temp_path, "wb") as f:
+                f.write(body_bytes)
                 f.flush()
                 os.fsync(f.fileno())
             
@@ -273,19 +295,24 @@ class HandoffVault:
             path = Path(row[5])
             if not path.exists():
                 return None
-            
-            with open(path, "r", encoding="utf-8") as f:
-                body = f.read()
-            
+
+            # Read in binary mode to preserve the exact bytes that were
+            # hashed at snapshot time (Windows newline translation would
+            # otherwise corrupt the round-trip).
+            with open(path, "rb") as f:
+                body = f.read().decode("utf-8")
+
+            # Severity is not stored in the snapshots table (only phase is).
+            # Use "unknown" on restore — callers can re-classify after.
             return ValidatedProposal(
                 proposal_id=row[0],
-                severity=row[1],  # Will be validated later
+                severity="unknown",
                 origin="vault_restore",
                 workflow_version="1.0",
                 phase=WorkflowPhase(row[1]),
                 status="restored",
                 body=body,
-                created_at=datetime.fromisoformat(row[2])
+                created_at=datetime.fromisoformat(row[2]),
             )
         finally:
             conn.close()

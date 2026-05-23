@@ -157,6 +157,190 @@ def gate_pytest() -> GateResult:
     return GateResult("pytest", passed, last_line)
 
 
+# ════════════════════════════════════════════════════════════════════
+#  PHASE 1 GATES — ARCH-60FE0001 governance core
+# ════════════════════════════════════════════════════════════════════
+
+PHASE1_MODULES = [
+    "src/workflow_models.py",
+    "src/schema_validator.py",
+    "src/handoff_vault.py",
+    "src/approval_logger.py",
+]
+
+
+def gate_phase1_modules_exist() -> GateResult:
+    """Phase 1 AC1: All 4 governance modules exist."""
+    missing = [m for m in PHASE1_MODULES if not (ROOT / m).is_file()]
+    return GateResult(
+        "phase1_modules_exist",
+        not missing,
+        "all 4 modules present" if not missing else f"missing: {', '.join(missing)}",
+    )
+
+
+def gate_phase1_tests_present() -> GateResult:
+    """Phase 1 AC3: A test file exists in tests/ for each Phase 1 module."""
+    required = [
+        "tests/test_workflow_models.py",
+        "tests/test_schema_validator.py",
+        "tests/test_handoff_vault.py",
+        "tests/test_approval_logger.py",
+    ]
+    missing = [t for t in required if not (ROOT / t).is_file()]
+    return GateResult(
+        "phase1_tests_present",
+        not missing,
+        "all 4 test files present" if not missing else f"missing: {', '.join(missing)}",
+    )
+
+
+def gate_phase1_test_count() -> GateResult:
+    """Phase 1 AC4: ≥20 test cases across Phase 1 test files.
+
+    Counts top-level functions starting with `test_` and methods inside
+    classes starting with `Test`. Static count, doesn't run them.
+    """
+    test_files = [
+        "tests/test_workflow_models.py",
+        "tests/test_schema_validator.py",
+        "tests/test_handoff_vault.py",
+        "tests/test_approval_logger.py",
+        "tests/test_governance_unit_of_work.py",
+    ]
+    pattern = re.compile(r"^\s*def\s+test_\w+\s*\(", re.M)
+    total = 0
+    breakdown: list[str] = []
+    for tf in test_files:
+        p = ROOT / tf
+        if not p.is_file():
+            continue
+        try:
+            n = len(pattern.findall(p.read_text(encoding="utf-8")))
+        except OSError:
+            n = 0
+        total += n
+        breakdown.append(f"{Path(tf).name}:{n}")
+    detail = f"{total} test cases ({', '.join(breakdown) or 'no files'}; limit ≥20)"
+    return GateResult("phase1_test_count", total >= 20, detail)
+
+
+def gate_phase1_no_misplaced_tests() -> GateResult:
+    """Phase 1 hygiene: No `test_*.py` files at repo root (must live in tests/)."""
+    misplaced = [p.name for p in ROOT.glob("test_*.py") if p.is_file()]
+    # Allow legacy ones that pre-existed (test_api_endpoints.py, test_sync*.py)
+    legacy = {"test_api_endpoints.py", "test_sync.py", "test_sync_simple.py"}
+    new_misplaced = [m for m in misplaced if m not in legacy]
+    return GateResult(
+        "phase1_no_misplaced_tests",
+        not new_misplaced,
+        "no new misplaced tests"
+        if not new_misplaced
+        else f"misplaced (move to tests/): {', '.join(new_misplaced)}",
+    )
+
+
+def gate_phase1_no_print_in_tests() -> GateResult:
+    """Phase 1 hygiene: Phase 1 tests use assert, not print.
+
+    A test that calls print() instead of assert() is not a test.
+    """
+    print_pattern = re.compile(r"^\s*print\s*\(", re.M)
+    assert_pattern = re.compile(r"^\s*assert\s+", re.M)
+    offenders: list[str] = []
+    test_files = [
+        "tests/test_workflow_models.py",
+        "tests/test_schema_validator.py",
+        "tests/test_handoff_vault.py",
+        "tests/test_approval_logger.py",
+        "tests/test_governance_unit_of_work.py",
+    ]
+    for tf in test_files:
+        p = ROOT / tf
+        if not p.is_file():
+            continue
+        try:
+            txt = p.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        prints = len(print_pattern.findall(txt))
+        asserts = len(assert_pattern.findall(txt))
+        # A file with prints but no asserts is suspect
+        if prints > 0 and asserts == 0:
+            offenders.append(f"{Path(tf).name} (prints={prints}, asserts=0)")
+    return GateResult(
+        "phase1_no_print_in_tests",
+        not offenders,
+        "tests use assert" if not offenders else f"print-only: {', '.join(offenders)}",
+    )
+
+
+def gate_phase1_pydantic_models() -> GateResult:
+    """Phase 1 AC1: workflow_models defines required Pydantic models."""
+    p = ROOT / "src" / "workflow_models.py"
+    if not p.is_file():
+        return GateResult("phase1_pydantic_models", False, "workflow_models.py not found")
+    try:
+        txt = p.read_text(encoding="utf-8")
+    except OSError as e:
+        return GateResult("phase1_pydantic_models", False, str(e))
+    required = ["ValidatedProposal", "ArtifactVersion", "ApprovalRecord"]
+    missing = [r for r in required if f"class {r}" not in txt]
+    return GateResult(
+        "phase1_pydantic_models",
+        not missing,
+        "all 3 models present" if not missing else f"missing class: {', '.join(missing)}",
+    )
+
+
+def gate_phase1_uow_pattern() -> GateResult:
+    """Phase 1 AC6: GovernanceUnitOfWork class exists with __enter__/__exit__ or @contextmanager."""
+    # Cline may have put it in handoff_vault.py or a separate governance_unit_of_work.py
+    candidates = ["src/governance_unit_of_work.py", "src/handoff_vault.py"]
+    for c in candidates:
+        p = ROOT / c
+        if not p.is_file():
+            continue
+        try:
+            txt = p.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        if "class GovernanceUnitOfWork" in txt or "def governance_unit_of_work" in txt:
+            has_ctx = (
+                "__enter__" in txt
+                or "@contextmanager" in txt
+                or "yield" in txt
+            )
+            return GateResult(
+                "phase1_uow_pattern",
+                has_ctx,
+                f"found in {c} (context manager: {has_ctx})",
+            )
+    return GateResult("phase1_uow_pattern", False, "GovernanceUnitOfWork not found")
+
+
+def gate_phase1_ruamel_yaml() -> GateResult:
+    """Phase 1 B4: schema_validator uses ruamel.yaml (not PyYAML) for round-trip."""
+    p = ROOT / "src" / "schema_validator.py"
+    if not p.is_file():
+        return GateResult("phase1_ruamel_yaml", False, "schema_validator.py not found")
+    try:
+        txt = p.read_text(encoding="utf-8")
+    except OSError as e:
+        return GateResult("phase1_ruamel_yaml", False, str(e))
+    uses_ruamel = "ruamel" in txt or "from ruamel" in txt
+    uses_pyyaml_only = "import yaml" in txt and not uses_ruamel
+    if uses_ruamel:
+        return GateResult("phase1_ruamel_yaml", True, "ruamel.yaml in use")
+    if uses_pyyaml_only:
+        return GateResult(
+            "phase1_ruamel_yaml",
+            False,
+            "uses PyYAML (no round-trip); B4 requires ruamel.yaml",
+        )
+    return GateResult("phase1_ruamel_yaml", False, "neither library imported")
+
+
 def gate_perf_smoke() -> GateResult:
     """Alpha Polish: ≤3% perf regression on import + cold init.
 
@@ -207,7 +391,7 @@ def gate_perf_smoke() -> GateResult:
 #  RUNNER
 # ════════════════════════════════════════════════════════════════════
 
-DEFAULT_GATES: list[Callable[[], GateResult]] = [
+PHASE0_GATES: list[Callable[[], GateResult]] = [
     gate_dev_route_size,
     gate_no_vault_literals,
     gate_one_trigger_sync_check,
@@ -216,7 +400,22 @@ DEFAULT_GATES: list[Callable[[], GateResult]] = [
     gate_pytest,
 ]
 
+PHASE1_GATES: list[Callable[[], GateResult]] = [
+    gate_phase1_modules_exist,
+    gate_phase1_pydantic_models,
+    gate_phase1_uow_pattern,
+    gate_phase1_ruamel_yaml,
+    gate_phase1_tests_present,
+    gate_phase1_test_count,
+    gate_phase1_no_misplaced_tests,
+    gate_phase1_no_print_in_tests,
+]
+
 BENCH_GATES: list[Callable[[], GateResult]] = [gate_perf_smoke]
+
+# DEFAULT_GATES is kept as an alias for backward compatibility with any
+# external CI scripts that might import it.
+DEFAULT_GATES: list[Callable[[], GateResult]] = PHASE0_GATES
 
 
 def run(gates: list[Callable[[], GateResult]]) -> list[GateResult]:
@@ -237,12 +436,12 @@ PASS = "■ PASS"
 FAIL = "□ FAIL"
 
 
-def render_text(results: list[GateResult]) -> str:
-    width = 70
+def render_text(results: list[GateResult], title: str) -> str:
+    width = 88
     bar = "═" * width
     lines: list[str] = []
     lines.append(bar)
-    lines.append("  ALPHA POLISH GATE — ARCH-A0F1B0C0 — Phase 0 Refactor")
+    lines.append(f"  {title}")
     lines.append(bar)
     name_w = max((len(r.name) for r in results), default=20) + 2
     for r in results:
@@ -269,9 +468,24 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Alpha Polish CI gate")
     parser.add_argument("--json", action="store_true", help="machine-readable output")
     parser.add_argument("--bench", action="store_true", help="include perf smoke test")
+    parser.add_argument(
+        "--phase",
+        choices=["0", "1", "all"],
+        default="all",
+        help="which phase gates to run (default: all)",
+    )
     args = parser.parse_args()
 
-    gates = list(DEFAULT_GATES)
+    if args.phase == "0":
+        gates = list(PHASE0_GATES)
+        title = "ALPHA POLISH GATE — Phase 0 (ARCH-A0F1B0C0)"
+    elif args.phase == "1":
+        gates = list(PHASE1_GATES)
+        title = "ALPHA POLISH GATE — Phase 1 (ARCH-60FE0001)"
+    else:
+        gates = list(PHASE0_GATES) + list(PHASE1_GATES)
+        title = "ALPHA POLISH GATE — Phase 0 + Phase 1"
+
     if args.bench:
         gates.extend(BENCH_GATES)
 
@@ -285,7 +499,7 @@ def main() -> int:
             indent=2,
         ))
     else:
-        print(render_text(results))
+        print(render_text(results, title))
 
     return 0 if all_passed else 1
 
