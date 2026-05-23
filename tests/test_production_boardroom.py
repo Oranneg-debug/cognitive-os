@@ -5,9 +5,6 @@ import pytest
 # Add src to path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from src.orchestrator import Orchestrator
-from src.llm_client import llm
-
 # This test fires a REAL boardroom council with live LLM calls, takes
 # ~5-10 minutes, costs significant GPU time, and creates artifacts in
 # council_memory/ and the vault. It is NOT a unit test — it is a manual
@@ -23,6 +20,9 @@ from src.llm_client import llm
            "Fires a real boardroom (~5-10 min, GPU heavy, writes artifacts).",
 )
 def test_production_boardroom():
+    # Import late to avoid collection-time errors when dependencies are missing
+    from src.orchestrator import Orchestrator
+    
     print("INITIALIZING PRODUCTION BOARDROOM TEST...")
     orchestrator = Orchestrator()
     
