@@ -341,6 +341,297 @@ def gate_phase1_ruamel_yaml() -> GateResult:
     return GateResult("phase1_ruamel_yaml", False, "neither library imported")
 
 
+# ════════════════════════════════════════════════════════════════════
+#  PHASE 2 GATES — ARCH-2007E0A1 routing automation
+# ════════════════════════════════════════════════════════════════════
+
+PHASE2_DELIVERABLES = [
+    "src/writer_protocols.py",        # T1
+    "src/markdown_fence_parser.py",   # T2
+    "src/routing_rules_schema.py",    # E3
+    "src/output_router.py",
+    "src/workflow_router.py",
+    "config/routing_rules.yaml",      # E1
+]
+
+
+def gate_phase2_deliverables_exist() -> GateResult:
+    """Phase 2: All 6 routing deliverables exist."""
+    missing = [m for m in PHASE2_DELIVERABLES if not (ROOT / m).is_file()]
+    return GateResult(
+        "phase2_deliverables_exist",
+        not missing,
+        "all 6 deliverables present"
+        if not missing
+        else f"missing: {', '.join(missing)}",
+    )
+
+
+def gate_phase2_writer_protocols() -> GateResult:
+    """Phase 2 T1: writer_protocols.py defines BackendWriterProtocol AND
+    VaultWriterProtocol as typing.Protocol classes (separate, not unified).
+    """
+    p = ROOT / "src" / "writer_protocols.py"
+    if not p.is_file():
+        return GateResult("phase2_writer_protocols", False, "writer_protocols.py not found")
+    try:
+        txt = p.read_text(encoding="utf-8")
+    except OSError as e:
+        return GateResult("phase2_writer_protocols", False, str(e))
+    if "Protocol" not in txt:
+        return GateResult(
+            "phase2_writer_protocols",
+            False,
+            "typing.Protocol not imported / used",
+        )
+    has_backend = "class BackendWriterProtocol" in txt
+    has_vault = "class VaultWriterProtocol" in txt
+    if has_backend and has_vault:
+        return GateResult(
+            "phase2_writer_protocols",
+            True,
+            "BackendWriterProtocol + VaultWriterProtocol both defined",
+        )
+    missing = []
+    if not has_backend:
+        missing.append("BackendWriterProtocol")
+    if not has_vault:
+        missing.append("VaultWriterProtocol")
+    return GateResult(
+        "phase2_writer_protocols",
+        False,
+        f"missing class: {', '.join(missing)}",
+    )
+
+
+def gate_phase2_catchall_route() -> GateResult:
+    """Phase 2 E1: routing_rules.yaml has a catch-all decision_only route."""
+    p = ROOT / "config" / "routing_rules.yaml"
+    if not p.is_file():
+        return GateResult("phase2_catchall_route", False, "routing_rules.yaml not found")
+    try:
+        txt = p.read_text(encoding="utf-8")
+    except OSError as e:
+        return GateResult("phase2_catchall_route", False, str(e))
+    # The catch-all must mention "decision_only" AND something
+    # signalling defaultness (catchall / default / fallback / .* / "*").
+    has_decision_only = "decision_only" in txt
+    has_catchall_marker = any(
+        token in txt
+        for token in ("catchall", "catch_all", "catch-all", "default", "fallback")
+    )
+    if has_decision_only and has_catchall_marker:
+        return GateResult(
+            "phase2_catchall_route",
+            True,
+            "decision_only catch-all present",
+        )
+    return GateResult(
+        "phase2_catchall_route",
+        False,
+        f"need both: decision_only={has_decision_only}, "
+        f"catch-all marker={has_catchall_marker}",
+    )
+
+
+def gate_phase2_yaml_schema_pydantic() -> GateResult:
+    """Phase 2 E3: routing_rules_schema.py uses Pydantic to validate the YAML."""
+    p = ROOT / "src" / "routing_rules_schema.py"
+    if not p.is_file():
+        return GateResult("phase2_yaml_schema_pydantic", False, "schema file not found")
+    try:
+        txt = p.read_text(encoding="utf-8")
+    except OSError as e:
+        return GateResult("phase2_yaml_schema_pydantic", False, str(e))
+    uses_pydantic = "BaseModel" in txt or "pydantic" in txt
+    return GateResult(
+        "phase2_yaml_schema_pydantic",
+        uses_pydantic,
+        "pydantic in use" if uses_pydantic else "no pydantic import",
+    )
+
+
+def gate_phase2_dead_letter_dir() -> GateResult:
+    """Phase 2 E5: output_router.py references a dead-letter directory."""
+    p = ROOT / "src" / "output_router.py"
+    if not p.is_file():
+        return GateResult("phase2_dead_letter_dir", False, "output_router.py not found")
+    try:
+        txt = p.read_text(encoding="utf-8")
+    except OSError as e:
+        return GateResult("phase2_dead_letter_dir", False, str(e))
+    has_dl = "failed_routings" in txt or "dead_letter" in txt or "dead-letter" in txt
+    return GateResult(
+        "phase2_dead_letter_dir",
+        has_dl,
+        "dead-letter path referenced"
+        if has_dl
+        else "no dead-letter path (E5 requires dev/failed_routings/)",
+    )
+
+
+def gate_phase2_single_writer_guard() -> GateResult:
+    """Phase 2 E4/T1: output_router.py does NOT import a vault-writer module.
+
+    Heuristic: scan for imports of known vault-writer modules. The
+    single-writer rule says only ``proposal_sync`` may write to the vault.
+    """
+    p = ROOT / "src" / "output_router.py"
+    if not p.is_file():
+        return GateResult("phase2_single_writer_guard", False, "output_router.py not found")
+    try:
+        txt = p.read_text(encoding="utf-8")
+    except OSError as e:
+        return GateResult("phase2_single_writer_guard", False, str(e))
+    # Forbidden imports — output_router must NOT pull in vault writers.
+    forbidden_patterns = [
+        r"^\s*from\s+src\.proposal_sync",
+        r"^\s*import\s+src\.proposal_sync",
+        r"^\s*from\s+src\.obsidian_writer",
+        r"^\s*import\s+src\.obsidian_writer",
+        r"^\s*from\s+src\.sync_proposals_to_kanban",
+    ]
+    hits: list[str] = []
+    for pat in forbidden_patterns:
+        m = re.search(pat, txt, re.M)
+        if m:
+            hits.append(m.group(0).strip())
+    return GateResult(
+        "phase2_single_writer_guard",
+        not hits,
+        "no vault-writer imports"
+        if not hits
+        else f"forbidden imports present: {', '.join(hits)}",
+    )
+
+
+def gate_phase2_fence_parser_stateful() -> GateResult:
+    """Phase 2 T2: markdown_fence_parser.py uses a state machine, not regex
+    matching of code fences. Heuristic: no ``re.`` calls that would parse
+    fences (it may use re for line splitting, so a soft check).
+    """
+    p = ROOT / "src" / "markdown_fence_parser.py"
+    if not p.is_file():
+        return GateResult("phase2_fence_parser_stateful", False, "fence_parser not found")
+    try:
+        txt = p.read_text(encoding="utf-8")
+    except OSError as e:
+        return GateResult("phase2_fence_parser_stateful", False, str(e))
+    # A state machine has at least: a state variable, a line iterator,
+    # and conditional fence-open/fence-close handling.
+    has_state = any(
+        token in txt
+        for token in ("in_fence", "inside_fence", "fence_open", "in_code_block")
+    )
+    iterates_lines = "splitlines" in txt or ".split('\\n')" in txt or 'split("\\n")' in txt or "for line in " in txt
+    if has_state and iterates_lines:
+        return GateResult(
+            "phase2_fence_parser_stateful",
+            True,
+            "state variable + line iteration present",
+        )
+    return GateResult(
+        "phase2_fence_parser_stateful",
+        False,
+        f"state var={has_state}, line iter={iterates_lines}",
+    )
+
+
+def gate_phase2_workflow_router_idempotency() -> GateResult:
+    """Phase 2 E6: workflow_router tracks processed files via checksums or
+    .processed flags so a restarted watcher does not re-fire.
+    """
+    p = ROOT / "src" / "workflow_router.py"
+    if not p.is_file():
+        return GateResult("phase2_workflow_router_idempotency", False, "workflow_router not found")
+    try:
+        txt = p.read_text(encoding="utf-8")
+    except OSError as e:
+        return GateResult("phase2_workflow_router_idempotency", False, str(e))
+    has_hash = "sha256" in txt.lower() or "checksum" in txt.lower()
+    has_flag = ".processed" in txt or "processed_files" in txt or "seen_files" in txt
+    if has_hash or has_flag:
+        markers = []
+        if has_hash:
+            markers.append("checksum")
+        if has_flag:
+            markers.append("processed-flag")
+        return GateResult(
+            "phase2_workflow_router_idempotency",
+            True,
+            f"idempotency via: {', '.join(markers)}",
+        )
+    return GateResult(
+        "phase2_workflow_router_idempotency",
+        False,
+        "no idempotency mechanism (E6 requires checksum or .processed flag)",
+    )
+
+
+def gate_phase2_tests_present() -> GateResult:
+    """Phase 2: Test files exist for the new modules."""
+    required = [
+        "tests/test_output_router.py",
+        "tests/test_workflow_router.py",
+    ]
+    missing = [t for t in required if not (ROOT / t).is_file()]
+    return GateResult(
+        "phase2_tests_present",
+        not missing,
+        "test files present" if not missing else f"missing: {', '.join(missing)}",
+    )
+
+
+def gate_phase2_test_count() -> GateResult:
+    """Phase 2: ≥15 test cases across Phase 2 test files."""
+    test_files = [
+        "tests/test_output_router.py",
+        "tests/test_workflow_router.py",
+        "tests/test_markdown_fence_parser.py",
+        "tests/test_writer_protocols.py",
+        "tests/test_routing_rules_schema.py",
+    ]
+    pattern = re.compile(r"^\s*def\s+test_\w+\s*\(", re.M)
+    total = 0
+    breakdown: list[str] = []
+    for tf in test_files:
+        p = ROOT / tf
+        if not p.is_file():
+            continue
+        try:
+            n = len(pattern.findall(p.read_text(encoding="utf-8")))
+        except OSError:
+            n = 0
+        total += n
+        breakdown.append(f"{Path(tf).name}:{n}")
+    detail = f"{total} test cases ({', '.join(breakdown) or 'no files'}; limit ≥15)"
+    return GateResult("phase2_test_count", total >= 15, detail)
+
+
+def gate_phase2_routing_fixtures() -> GateResult:
+    """Phase 2 E2: CI regression suite with 7 fixture council outputs and
+    golden RoutingDecision JSONs in tests/routing/.
+    """
+    fixtures_dir = ROOT / "tests" / "routing"
+    if not fixtures_dir.is_dir():
+        return GateResult(
+            "phase2_routing_fixtures",
+            False,
+            "tests/routing/ directory not found (E2 regression suite)",
+        )
+    inputs = list(fixtures_dir.glob("**/*.md")) + list(fixtures_dir.glob("**/input*.txt"))
+    goldens = list(fixtures_dir.glob("**/*.golden.json")) + list(
+        fixtures_dir.glob("**/golden*.json")
+    )
+    # At minimum: 7 inputs + 7 goldens (or paired files).
+    passed = len(inputs) >= 7 and len(goldens) >= 7
+    return GateResult(
+        "phase2_routing_fixtures",
+        passed,
+        f"{len(inputs)} input(s), {len(goldens)} golden(s); need ≥7 of each",
+    )
+
+
 def gate_perf_smoke() -> GateResult:
     """Alpha Polish: ≤3% perf regression on import + cold init.
 
@@ -411,6 +702,20 @@ PHASE1_GATES: list[Callable[[], GateResult]] = [
     gate_phase1_no_print_in_tests,
 ]
 
+PHASE2_GATES: list[Callable[[], GateResult]] = [
+    gate_phase2_deliverables_exist,
+    gate_phase2_writer_protocols,
+    gate_phase2_catchall_route,
+    gate_phase2_yaml_schema_pydantic,
+    gate_phase2_dead_letter_dir,
+    gate_phase2_single_writer_guard,
+    gate_phase2_fence_parser_stateful,
+    gate_phase2_workflow_router_idempotency,
+    gate_phase2_tests_present,
+    gate_phase2_test_count,
+    gate_phase2_routing_fixtures,
+]
+
 BENCH_GATES: list[Callable[[], GateResult]] = [gate_perf_smoke]
 
 # DEFAULT_GATES is kept as an alias for backward compatibility with any
@@ -470,7 +775,7 @@ def main() -> int:
     parser.add_argument("--bench", action="store_true", help="include perf smoke test")
     parser.add_argument(
         "--phase",
-        choices=["0", "1", "all"],
+        choices=["0", "1", "2", "all"],
         default="all",
         help="which phase gates to run (default: all)",
     )
@@ -482,9 +787,12 @@ def main() -> int:
     elif args.phase == "1":
         gates = list(PHASE1_GATES)
         title = "ALPHA POLISH GATE — Phase 1 (ARCH-60FE0001)"
+    elif args.phase == "2":
+        gates = list(PHASE2_GATES)
+        title = "ALPHA POLISH GATE — Phase 2 (ARCH-2007E0A1)"
     else:
-        gates = list(PHASE0_GATES) + list(PHASE1_GATES)
-        title = "ALPHA POLISH GATE — Phase 0 + Phase 1"
+        gates = list(PHASE0_GATES) + list(PHASE1_GATES) + list(PHASE2_GATES)
+        title = "ALPHA POLISH GATE — Phase 0 + Phase 1 + Phase 2"
 
     if args.bench:
         gates.extend(BENCH_GATES)
