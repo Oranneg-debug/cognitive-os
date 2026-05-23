@@ -6,14 +6,20 @@ import os
 import re
 import yaml
 import psutil
+from pathlib import Path
 from typing import Optional, Union, Dict, Any
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+
+# Governance Foundation imports (A1, ARCH-2007E0A1)
+from src.output_router import OutputRouter
+from src.filesystem_backend_writer import FilesystemBackendWriter
+from src.routing_rules_schema import load_routing_rules
 from src.orchestrator import Orchestrator
 from src.obsidian_writer import ObsidianWriter
-from src.paths import VAULT_ROOT
+from src.paths import VAULT_ROOT, DEV_DIR
 
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -556,6 +562,28 @@ def benchmarks():
     return {"count": len(runs), "runs": runs}
 
 
+# Initialize Governance Foundation (A1, ARCH-2007E0A1)
+# Boot-time validation: load rules/state at startup, fail fast if malformed
+ROUTING_RULES_PATH = Path(__file__).resolve().parent.parent / "config" / "routing_rules.yaml"
+STATE_MACHINE_PATH = Path(__file__).resolve().parent.parent / "config" / "state_machine.yaml"
+
+# Validate routing rules (E3: fail-fast)
+load_routing_rules(ROUTING_RULES_PATH)
+
+# Validate state machine exists (B2: boot-time check)
+if not STATE_MACHINE_PATH.exists():
+    raise FileNotFoundError(f"State machine config not found: {STATE_MACHINE_PATH}")
+
+# Initialize backend writer and router
+DEAD_LETTER_DIR = DEV_DIR / "failed_routings"
+backend_writer = FilesystemBackendWriter(base_dir=DEV_DIR, dead_letter_dir=DEAD_LETTER_DIR)
+output_router = OutputRouter(
+    rules_path=ROUTING_RULES_PATH,
+    backend_writer=backend_writer,
+    dead_letter_dir=DEAD_LETTER_DIR
+)
+print("[GOV] OutputRouter initialized successfully")
+
 # Initialize Core Services Globally
 orchestrator = Orchestrator()
 obsidian = ObsidianWriter()
@@ -573,7 +601,7 @@ class PromptRequest(BaseModel):
 def process_prompt(request: PromptRequest):
     """
     Receives a prompt from Obsidian or other interfaces,
-    runs the Cognitive OS, and saves the result.
+    runs the Cognitive OS, and routes the synthesis via OutputRouter.
     """
     print(f"\n🌐 API Request Received: {request.prompt[:50]}...")
     
@@ -589,51 +617,26 @@ def process_prompt(request: PromptRequest):
             source_file_path=request.source_file_path
         )
         
-        # 2. Save to mock Obsidian vault
-        pattern = orchestrator.sentry.classify_request(request.prompt)["pattern"]
-        task_id = orchestrator.memory.generate_task_id(request.prompt)
-
-        if pattern == "DEVELOPMENT_LIFECYCLE":
-            file_path = None
-            report_name = "dev_proposal"
-            task_data = {}
-            absolute_file_path = None
-        else:
-            keywords = "_".join(re.findall(r'\w+', request.prompt)[:5])
-            file_path = obsidian.write_note(
-                title=f"OLM_R_{keywords}",
-                content=result,
-                pattern_used=pattern,
-                task_id=task_id,
-                source_file_path=request.source_file_path
-            )
-            absolute_file_path = file_path # Renamed for clarity, assuming file_path from write_note is absolute
-            report_name = os.path.basename(absolute_file_path).replace('.md', '') if absolute_file_path else f"OLM_R_{keywords}"
-            task_data = orchestrator.memory.get_task_data(task_id)
-            obsidian.save_memory_log(task_id, task_data, report_name)
-
-        # --- IMPORTANT FIX: Calculate vault-relative path correctly ---
-        # Use the centralized vault root from paths.py
-        OBSIDIAN_VAULT_ROOT = str(VAULT_ROOT)
+        # 2. Route synthesis via OutputRouter (A1: replace inline string-matching)
+        decision = output_router.route(result)
+        path = output_router.apply(decision, result)
         
-        relative_path_for_obsidian_plugin = None
-        if absolute_file_path:
-            try:
-                # Calculate path relative to the defined Obsidian vault root
-                relative_path_for_obsidian_plugin = os.path.relpath(absolute_file_path, OBSIDIAN_VAULT_ROOT).replace("\\", "/")
-            except ValueError:
-                print(f"⚠️ Could not calculate relative path for {absolute_file_path}. Sending absolute path.")
-                relative_path_for_obsidian_plugin = absolute_file_path
+        # 3. Get task_id for the response
+        task_id = orchestrator.memory.generate_task_id(request.prompt)
 
         return {
             "status": "success",
-            "pattern": pattern,
+            "routing_decision": {
+                "rule_name": decision.rule_name,
+                "destination": decision.destination,
+                "workflow_phase": decision.workflow_phase,
+                "severity": decision.severity,
+                "matched_markers": decision.matched_markers
+            },
+            "saved_path": str(path),
             "task_id": task_id,
-            "saved_path": absolute_file_path, # Keep absolute path for logging/debugging
-            "relative_path": relative_path_for_obsidian_plugin, # This is what the plugin should use
             "response": result,
-            "opinions": task_data.get("models_participated", []),
-            "oversight": task_data.get("oversight_analysis", {}).get("raw_analysis", "")
+            "oversight": orchestrator.memory.get_task_data(task_id).get("oversight_analysis", {}).get("raw_analysis", "")
         }
         
     except Exception as e:
