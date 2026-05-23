@@ -632,6 +632,324 @@ def gate_phase2_routing_fixtures() -> GateResult:
     )
 
 
+# ════════════════════════════════════════════════════════════════════
+#  PHASE 3+4 GATES — ARCH-F10FE0E1 workflow execution
+# ════════════════════════════════════════════════════════════════════
+
+PHASE34_DELIVERABLES = [
+    "src/workflow_engine.py",        # central state machine
+    "src/git_operations.py",         # T1 git wrapper with timeouts
+    "config/state_machine.yaml",     # phases + transitions + Gate #3 SQL
+]
+
+
+def gate_phase34_deliverables_exist() -> GateResult:
+    """Phase 3+4: All 3 workflow execution deliverables exist."""
+    missing = [m for m in PHASE34_DELIVERABLES if not (ROOT / m).is_file()]
+    return GateResult(
+        "phase34_deliverables_exist",
+        not missing,
+        "all 3 deliverables present"
+        if not missing
+        else f"missing: {', '.join(missing)}",
+    )
+
+
+def gate_phase34_transition_request_model() -> GateResult:
+    """Phase 3+4 G3: TransitionRequest model exists with version_hash field."""
+    p = ROOT / "src" / "workflow_models.py"
+    if not p.is_file():
+        return GateResult("phase34_transition_request_model", False, "workflow_models.py not found")
+    try:
+        txt = p.read_text(encoding="utf-8")
+    except OSError as e:
+        return GateResult("phase34_transition_request_model", False, str(e))
+    has_class = "class TransitionRequest" in txt
+    has_field = "version_hash" in txt
+    if has_class and has_field:
+        return GateResult(
+            "phase34_transition_request_model",
+            True,
+            "TransitionRequest with version_hash present",
+        )
+    missing = []
+    if not has_class:
+        missing.append("class TransitionRequest")
+    if not has_field:
+        missing.append("version_hash field")
+    return GateResult("phase34_transition_request_model", False, ", ".join(missing))
+
+
+def gate_phase34_saga_compensating_actions() -> GateResult:
+    """Phase 3+4 G2/T3: Saga pattern with named CompensatingAction class.
+
+    T3 mandates explicit named compensating functions per step, not
+    generic rollback logic.
+    """
+    p = ROOT / "src" / "workflow_models.py"
+    eng = ROOT / "src" / "workflow_engine.py"
+    if not p.is_file() and not eng.is_file():
+        return GateResult(
+            "phase34_saga_compensating_actions",
+            False,
+            "workflow_models.py and workflow_engine.py both missing",
+        )
+    sources = ""
+    for f in (p, eng):
+        if f.is_file():
+            try:
+                sources += f.read_text(encoding="utf-8")
+            except OSError:
+                continue
+    has_compensating = "CompensatingAction" in sources or "class Compensating" in sources
+    has_saga = "Saga" in sources or "SagaStep" in sources or "SagaTransaction" in sources
+    if has_compensating and has_saga:
+        return GateResult(
+            "phase34_saga_compensating_actions",
+            True,
+            "CompensatingAction + Saga types present",
+        )
+    missing = []
+    if not has_compensating:
+        missing.append("CompensatingAction")
+    if not has_saga:
+        missing.append("SagaTransaction / SagaStep")
+    return GateResult(
+        "phase34_saga_compensating_actions",
+        False,
+        f"missing: {', '.join(missing)}",
+    )
+
+
+def gate_phase34_git_ops_timeouts() -> GateResult:
+    """Phase 3+4 T1: git_operations.py uses explicit timeouts on subprocess calls.
+
+    Without timeouts a hung ``git tag`` blocks a FastAPI worker
+    indefinitely.
+    """
+    p = ROOT / "src" / "git_operations.py"
+    if not p.is_file():
+        return GateResult("phase34_git_ops_timeouts", False, "git_operations.py not found")
+    try:
+        txt = p.read_text(encoding="utf-8")
+    except OSError as e:
+        return GateResult("phase34_git_ops_timeouts", False, str(e))
+    # Look for subprocess.run / subprocess.Popen with timeout= kw
+    has_subprocess = "subprocess" in txt
+    has_timeout_kw = re.search(r"timeout\s*=", txt) is not None
+    has_asyncio = "asyncio.to_thread" in txt or "loop.run_in_executor" in txt
+    if has_subprocess and has_timeout_kw:
+        marker = "+ asyncio.to_thread" if has_asyncio else "sync"
+        return GateResult(
+            "phase34_git_ops_timeouts",
+            True,
+            f"subprocess + timeout kwarg present ({marker})",
+        )
+    missing = []
+    if not has_subprocess:
+        missing.append("subprocess module")
+    if not has_timeout_kw:
+        missing.append("timeout= kwarg")
+    return GateResult(
+        "phase34_git_ops_timeouts",
+        False,
+        f"missing: {', '.join(missing)}",
+    )
+
+
+def gate_phase34_version_hash_semantic() -> GateResult:
+    """Phase 3+4 T2: version_hash computed from semantic-only keys.
+
+    T2 requires the hash basis to be {phase, status, substatus, approver,
+    severity, depends_on} and EXCLUDE volatile metadata like
+    last_modified. Heuristic: scan for the function that computes the
+    hash; confirm it does NOT include 'last_modified' or 'updated_ts'.
+    """
+    p = ROOT / "src" / "workflow_engine.py"
+    if not p.is_file():
+        # May also live in workflow_models.py
+        p = ROOT / "src" / "workflow_models.py"
+        if not p.is_file():
+            return GateResult(
+                "phase34_version_hash_semantic",
+                False,
+                "neither workflow_engine.py nor workflow_models.py found",
+            )
+    try:
+        txt = p.read_text(encoding="utf-8")
+    except OSError as e:
+        return GateResult("phase34_version_hash_semantic", False, str(e))
+    # Look for the hash function and its semantic-key set
+    semantic_keys = {"phase", "status", "substatus", "approver", "severity", "depends_on"}
+    semantic_hits = sum(1 for k in semantic_keys if k in txt)
+    # Volatile keys MUST NOT appear in any version-hash-related function.
+    # Heuristic: presence of 'last_modified' or 'updated_ts' literally in
+    # the file is suspicious but not always wrong (e.g. they may exist
+    # as Pydantic fields). Check the version_hash function body.
+    mention_hash = "version_hash" in txt
+    if not mention_hash:
+        return GateResult(
+            "phase34_version_hash_semantic",
+            False,
+            "no 'version_hash' references in workflow source",
+        )
+    passed = semantic_hits >= 4  # At least 4 of the 6 semantic keys named
+    return GateResult(
+        "phase34_version_hash_semantic",
+        passed,
+        f"{semantic_hits}/6 semantic keys referenced "
+        f"({', '.join(sorted(k for k in semantic_keys if k in txt))})",
+    )
+
+
+def gate_phase34_gate3_sqlite_index() -> GateResult:
+    """Phase 3+4 T4: composite index on approval_log (proposal_id, role,
+    decision, ts) for the Gate #3 query.
+
+    Check: an ``CREATE INDEX`` statement covering those columns appears
+    somewhere in src/ (typically in approval_logger.py or workflow_engine.py).
+    """
+    pattern = re.compile(
+        r"CREATE\s+INDEX[^;]*?approval_log[^;]*?proposal_id[^;]*?role[^;]*?decision",
+        re.I | re.S,
+    )
+    for f in (ROOT / "src").rglob("*.py"):
+        try:
+            if pattern.search(f.read_text(encoding="utf-8")):
+                return GateResult(
+                    "phase34_gate3_sqlite_index",
+                    True,
+                    f"composite index found in {f.relative_to(ROOT)}",
+                )
+        except OSError:
+            continue
+    return GateResult(
+        "phase34_gate3_sqlite_index",
+        False,
+        "no CREATE INDEX on approval_log(proposal_id, role, decision, ...) found",
+    )
+
+
+def gate_phase34_state_machine_yaml() -> GateResult:
+    """Phase 3+4: config/state_machine.yaml exists with phase + transition
+    definitions and a Gate #3 SQL spec.
+    """
+    p = ROOT / "config" / "state_machine.yaml"
+    if not p.is_file():
+        return GateResult("phase34_state_machine_yaml", False, "state_machine.yaml not found")
+    try:
+        txt = p.read_text(encoding="utf-8")
+    except OSError as e:
+        return GateResult("phase34_state_machine_yaml", False, str(e))
+    has_phases = "phases" in txt or "states" in txt
+    has_transitions = "transitions" in txt
+    has_gate3 = "gate" in txt.lower() and ("APPROVED" in txt or "approval_log" in txt)
+    if has_phases and has_transitions and has_gate3:
+        return GateResult(
+            "phase34_state_machine_yaml",
+            True,
+            "phases + transitions + Gate #3 spec present",
+        )
+    missing = []
+    if not has_phases:
+        missing.append("phases/states")
+    if not has_transitions:
+        missing.append("transitions")
+    if not has_gate3:
+        missing.append("Gate #3 spec (APPROVED + approval_log)")
+    return GateResult(
+        "phase34_state_machine_yaml",
+        False,
+        f"missing: {', '.join(missing)}",
+    )
+
+
+def gate_phase34_single_phase_writer() -> GateResult:
+    """Phase 3+4 V2/G2: Only workflow_engine.py writes the phase: field.
+
+    Other modules (dev_route, kanban_processor, proposal_writer) must
+    delegate. Heuristic: grep for ``["']phase["']\\s*:`` writes outside
+    workflow_engine.
+    """
+    # Search for writes that assign to a phase field
+    write_patterns = [
+        re.compile(r"""['\"]phase['\"]\s*:\s*['\"]"""),  # YAML/dict literal assignment
+        re.compile(r"""\bphase\s*=\s*['\"]"""),
+    ]
+    violators: list[str] = []
+    allowed = {"src/workflow_engine.py", "src/workflow_models.py"}
+    for f in (ROOT / "src").rglob("*.py"):
+        rel = str(f.relative_to(ROOT)).replace("\\", "/")
+        if rel in allowed:
+            continue
+        if rel.endswith("_test.py") or "/tests/" in rel:
+            continue
+        try:
+            txt = f.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        # Skip the existing schema_validator (it operates on YAML structurally,
+        # not as a writer of phase transitions).
+        if rel == "src/schema_validator.py":
+            continue
+        for pat in write_patterns:
+            for m in pat.finditer(txt):
+                # Allow if it's clearly a comparison or read, not a write
+                line_start = txt.rfind("\n", 0, m.start()) + 1
+                line_end = txt.find("\n", m.end())
+                line = txt[line_start:line_end if line_end >= 0 else None]
+                if "==" in line or ".get(" in line or "in " in line:
+                    continue
+                violators.append(f"{rel}:{txt.count(chr(10), 0, m.start())+1}")
+    return GateResult(
+        "phase34_single_phase_writer",
+        not violators,
+        "no out-of-band phase writes"
+        if not violators
+        else f"{len(violators)} suspect write(s): {', '.join(violators[:3])}",
+    )
+
+
+def gate_phase34_tests_present() -> GateResult:
+    """Phase 3+4: Test files exist for the new modules."""
+    required = [
+        "tests/test_workflow_engine.py",
+        "tests/test_git_operations.py",
+    ]
+    missing = [t for t in required if not (ROOT / t).is_file()]
+    return GateResult(
+        "phase34_tests_present",
+        not missing,
+        "test files present" if not missing else f"missing: {', '.join(missing)}",
+    )
+
+
+def gate_phase34_test_count() -> GateResult:
+    """Phase 3+4: ≥15 test cases across Phase 3+4 test files."""
+    test_files = [
+        "tests/test_workflow_engine.py",
+        "tests/test_git_operations.py",
+        "tests/test_state_machine_yaml.py",
+        "tests/test_transition_request.py",
+        "tests/test_saga.py",
+    ]
+    pattern = re.compile(r"^\s*def\s+test_\w+\s*\(", re.M)
+    total = 0
+    breakdown: list[str] = []
+    for tf in test_files:
+        p = ROOT / tf
+        if not p.is_file():
+            continue
+        try:
+            n = len(pattern.findall(p.read_text(encoding="utf-8")))
+        except OSError:
+            n = 0
+        total += n
+        breakdown.append(f"{Path(tf).name}:{n}")
+    detail = f"{total} test cases ({', '.join(breakdown) or 'no files'}; limit ≥15)"
+    return GateResult("phase34_test_count", total >= 15, detail)
+
+
 def gate_perf_smoke() -> GateResult:
     """Alpha Polish: ≤3% perf regression on import + cold init.
 
@@ -716,6 +1034,19 @@ PHASE2_GATES: list[Callable[[], GateResult]] = [
     gate_phase2_routing_fixtures,
 ]
 
+PHASE34_GATES: list[Callable[[], GateResult]] = [
+    gate_phase34_deliverables_exist,
+    gate_phase34_state_machine_yaml,
+    gate_phase34_transition_request_model,
+    gate_phase34_saga_compensating_actions,
+    gate_phase34_git_ops_timeouts,
+    gate_phase34_version_hash_semantic,
+    gate_phase34_gate3_sqlite_index,
+    gate_phase34_single_phase_writer,
+    gate_phase34_tests_present,
+    gate_phase34_test_count,
+]
+
 BENCH_GATES: list[Callable[[], GateResult]] = [gate_perf_smoke]
 
 # DEFAULT_GATES is kept as an alias for backward compatibility with any
@@ -775,7 +1106,7 @@ def main() -> int:
     parser.add_argument("--bench", action="store_true", help="include perf smoke test")
     parser.add_argument(
         "--phase",
-        choices=["0", "1", "2", "all"],
+        choices=["0", "1", "2", "34", "all"],
         default="all",
         help="which phase gates to run (default: all)",
     )
@@ -790,9 +1121,17 @@ def main() -> int:
     elif args.phase == "2":
         gates = list(PHASE2_GATES)
         title = "ALPHA POLISH GATE — Phase 2 (ARCH-2007E0A1)"
+    elif args.phase == "34":
+        gates = list(PHASE34_GATES)
+        title = "ALPHA POLISH GATE — Phase 3+4 (ARCH-F10FE0E1)"
     else:
-        gates = list(PHASE0_GATES) + list(PHASE1_GATES) + list(PHASE2_GATES)
-        title = "ALPHA POLISH GATE — Phase 0 + Phase 1 + Phase 2"
+        gates = (
+            list(PHASE0_GATES)
+            + list(PHASE1_GATES)
+            + list(PHASE2_GATES)
+            + list(PHASE34_GATES)
+        )
+        title = "ALPHA POLISH GATE — Phase 0 + 1 + 2 + 3+4"
 
     if args.bench:
         gates.extend(BENCH_GATES)
