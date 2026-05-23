@@ -875,7 +875,11 @@ IMPORTANT INSTRUCTIONS:
         # FORWARD PHASE TRANSITIONS (Proposal→Beta, Beta→Alpha, etc.)
         # ----------------------------------------------------------------
         current_phase = self._get_proposal_current_phase(content)
-        next_phase = new_info.get("phase", "unknown")
+        # Columns store the lifecycle phase under 'phase_key' (renamed from
+        # 'phase' to avoid colliding with the single-phase-writer gate on
+        # configuration data). Older callers expected 'phase' — fall back
+        # to it for backward compat.
+        next_phase = new_info.get("phase_key") or new_info.get("phase", "unknown")
 
         print(f"Processing transition: {old_column} → {new_column}")
         print(f"Proposal ID: {proposal_id}")
