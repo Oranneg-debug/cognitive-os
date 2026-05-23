@@ -524,21 +524,54 @@ class KanbanProcessor:
             print(f"[FRONTMATTER DEBUG] Updated content length: {len(updated_content)}")
             print(f"[FRONTMATTER DEBUG] First 100 chars after update: {updated_content[:100]}")
             
-            # Write the updated content back
-            with open(proposal_file, 'w', encoding='utf-8') as f:
+            # Write the updated content back (vault, the source-of-truth here)
+            with open(proposal_file, 'w', encoding='utf-8', newline='') as f:
                 f.write(updated_content)
-            
+
+            # ALSO write to the backend twin so proposal_sync doesn't go RED
+            # on the next health-check. Without this, the watcher refuses to
+            # process the next transition until a human resolves the conflict
+            # (observed 2026-05-24 — blocked Beta Testing fires).
+            try:
+                backend_twin = self._backend_twin_path(proposal_file)
+                if backend_twin and os.path.exists(os.path.dirname(backend_twin)):
+                    with open(backend_twin, 'w', encoding='utf-8', newline='') as f:
+                        f.write(updated_content)
+                    print(f"[FRONTMATTER SUCCESS] Mirrored to backend: {backend_twin}")
+            except Exception as twin_err:
+                # Non-fatal — the vault write succeeded, that's what matters
+                # for Obsidian. Log so we know the backend drifted.
+                print(f"[FRONTMATTER WARN] Backend twin mirror failed: {twin_err}")
+
             print(f"[FRONTMATTER SUCCESS] Updated {proposal_file}:")
             for key, value in field_updates.items():
                 print(f"  {key} = {value}")
-            
+
             return True
-            
+
         except Exception as e:
             print(f"[FRONTMATTER ERROR] Exception updating status in {proposal_file}: {e}")
             import traceback
             traceback.print_exc()
             return False
+
+    def _backend_twin_path(self, vault_proposal_file: str) -> Optional[str]:
+        """Map a vault proposal-file path to its backend twin.
+
+        Vault layout: <vault>/1. P - Seedlings/dev/proposals/<file>.md
+        Backend layout: <repo>/dev/proposals/<file>.md
+
+        If ``vault_proposal_file`` is already a backend path (e.g. when
+        running offline), returns None so we don't double-write.
+        """
+        normalised = vault_proposal_file.replace("\\", "/")
+        marker = "/1. P - Seedlings/dev/proposals/"
+        if marker not in normalised:
+            return None  # already backend or unknown layout
+        filename = os.path.basename(vault_proposal_file)
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        repo_root = os.path.dirname(script_dir)
+        return os.path.join(repo_root, "dev", "proposals", filename)
     
     def sync_proposals(self) -> dict:
         """
