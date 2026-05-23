@@ -1,11 +1,16 @@
 import os
 from datetime import datetime
+from pathlib import Path
+
+from src.paths import VAULT_COUNCIL_OUTPUTS, VAULT_MEMORY_LOGS
+
 
 class ObsidianWriter:
-    def __init__(self, vault_path: str = "E:/Oranneg/CloudStation/Documents/Obsidian/Grand Nexus/AI-Help/cognitive-os"):
-        self.vault_path = vault_path
-        # Hardcoded memory path per constraints
-        self.memory_path = "E:/Oranneg/CloudStation/Documents/Obsidian/Grand Nexus/AI-Help/cognitive-os/memory_logs"
+    def __init__(self, vault_path: str | Path | None = None):
+        # Default to canonical vault location from paths.py; accept override
+        # as Path or string for backward compatibility.
+        self.vault_path = str(vault_path) if vault_path else str(VAULT_COUNCIL_OUTPUTS)
+        self.memory_path = str(VAULT_MEMORY_LOGS)
         os.makedirs(self.vault_path, exist_ok=True)
         os.makedirs(self.memory_path, exist_ok=True)
         
