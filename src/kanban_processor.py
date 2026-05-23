@@ -32,6 +32,23 @@ if src_dir not in sys.path:
 from dev_route import DevRouteManager
 import json
 
+from src.sync_check import trigger_sync_check
+
+
+def _get_sync_manager():
+    """
+    Get or create the ProposalSyncManager instance.
+    
+    Returns:
+        ProposalSyncManager: The sync manager instance or None if unavailable
+    """
+    try:
+        from src.proposal_sync import ProposalSyncManager
+        return ProposalSyncManager()
+    except (ImportError, Exception):
+        # Fallback if proposal_sync module is not available
+        return None
+
 
 # ==============================================================================
 # CONFIGURABLE STATUS MAPPING
@@ -201,6 +218,15 @@ class KanbanProcessor:
             print("No cache found. Starting fresh.")
             return {"cards": {}, "last_updated": None}
     
+    def _trigger_sync_check(self) -> dict:
+        """
+        Trigger a sync check and log any issues.
+        
+        Returns:
+            dict with sync status information
+        """
+        return trigger_sync_check()
+    
     def _save_cache(self):
         """Save current card positions to cache."""
         self.cache["last_updated"] = datetime.now().isoformat()
@@ -257,8 +283,8 @@ class KanbanProcessor:
         return columns_data
     
     def _contains_proposal_id(self, line: str) -> bool:
-        """Check if line contains a proposal ID."""
-        return bool(re.search(r'DEV-\d{8,14}-?[A-Z0-9]+', line))
+        """Check if line contains a proposal ID (DEV/ARCH/NLST prefix)."""
+        return bool(re.search(r'(?:DEV|ARCH|NLST)-\d{8,14}-?[A-Z0-9]+', line))
     
     def _extract_proposal_id_from_line(self, line: str) -> Optional[str]:
         """
@@ -279,13 +305,13 @@ class KanbanProcessor:
         else:
             title_portion = line
         
-        # Try to extract from title portion first
-        id_match = re.search(r'DEV-\d{8}-\d{6}-[A-Z0-9]+', title_portion)
+        # Try to extract from title portion first (DEV/ARCH/NLST prefixes)
+        id_match = re.search(r'(?:DEV|ARCH|NLST)-\d{8}-\d{6}-[A-Z0-9]+', title_portion)
         if id_match:
             return id_match.group()
         
         # Fallback: try to extract from entire line
-        id_match = re.search(r'DEV-\d{8}-\d{6}-[A-Z0-9]+', line)
+        id_match = re.search(r'(?:DEV|ARCH|NLST)-\d{8}-\d{6}-[A-Z0-9]+', line)
         if id_match:
             return id_match.group()
         
@@ -510,6 +536,40 @@ class KanbanProcessor:
             traceback.print_exc()
             return False
     
+    def sync_proposals(self) -> dict:
+        """
+        Sync proposals from backend to vault.
+        
+        Returns:
+            dict with sync result information
+        """
+        try:
+            sync_manager = _get_sync_manager()
+            if sync_manager:
+                result = sync_manager.sync_backend_to_vault()
+                result_dict = result.to_dict()
+                
+                if result_dict["success"]:
+                    return {
+                        "success": True,
+                        "message": f"Synced {result_dict['files_synced']} files",
+                        "details": result_dict
+                    }
+                else:
+                    return {
+                        "success": False,
+                        "message": f"Sync completed with errors: {result_dict['errors']}",
+                        "details": result_dict
+                    }
+        except Exception as e:
+            return {
+                "success": False,
+                "message": f"Sync failed: {str(e)}",
+                "error": str(e)
+            }
+        
+        return {"success": False, "message": "Sync manager unavailable"}
+
     def _get_status_emoji(self, column: str) -> Tuple[str, str]:
         """Return emoji and text for a column."""
         status_map = {
@@ -1191,9 +1251,9 @@ kanban-plugin: board
 """
     
     def _extract_proposal_id_from_filename(self, filename: str) -> Optional[str]:
-        """Extract proposal ID from filename."""
-        # Match DEV-YYYYMMDD-HHMMSS-XXXX pattern anywhere in filename (handles various formats)
-        match = re.search(r'(DEV-\d{8}-\d{6}-[A-Z0-9]+)', filename)
+        """Extract proposal ID from filename (DEV/ARCH/NLST prefixes)."""
+        # Match <PREFIX>-YYYYMMDD-HHMMSS-XXXX pattern anywhere in filename
+        match = re.search(r'((?:DEV|ARCH|NLST)-\d{8}-\d{6}-[A-Z0-9]+)', filename)
         return match.group(1) if match else None
     
     def _extract_proposal_kanban_id_from_file(self, filepath: str) -> Optional[str]:
