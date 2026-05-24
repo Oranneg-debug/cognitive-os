@@ -125,11 +125,11 @@ def run_recovery() -> Dict[str, Any]:
         "actions": []
     }
     
-    if not UoW_LOG_DIR.exists():
+    if not UOW_LOG_DIR.exists():
         return result
     
     # Get all undo log files
-    undo_logs = list(UoW_LOG_DIR.glob("*.undo.json"))
+    undo_logs = list(UOW_LOG_DIR.glob("*.undo.json"))
     
     for log_path in undo_logs:
         uow_id = log_path.stem
