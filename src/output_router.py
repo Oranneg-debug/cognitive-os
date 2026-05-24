@@ -39,6 +39,8 @@ from src.markdown_fence_parser import strip_fences
 from src.routing_rules_schema import RoutingDecision, RoutingRulesFile, load_routing_rules
 from src.writer_protocols import BackendWriterProtocol, SingleWriterRuleViolation, assert_no_vault_writer
 
+from datetime import datetime
+
 # Import paths constants for destination resolution
 from src.paths import (
     ARCHIVES_DIR,
@@ -213,7 +215,7 @@ class OutputRouter:
                 decision.destination, self._dead_letter_dir
             )
             # Generate a unique filename based on rule and timestamp
-            timestamp = Path.cwd().name  # Placeholder - real impl would use datetime
+            timestamp = datetime.now().strftime("%Y%m%dT%H%M%S_%f")
             filename = f"{decision.rule_name}_{timestamp}.md"
             full_path = destination_path / filename
 
@@ -256,7 +258,6 @@ class OutputRouter:
 
         # Write files to dead-letter directory. Timestamp avoids collision
         # when multiple failures hit the same rule.
-        from datetime import datetime
         timestamp = datetime.now().strftime("%Y%m%dT%H%M%S_%f")
         base_name = f"{decision.rule_name}_{timestamp}"
 
