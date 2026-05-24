@@ -41,6 +41,17 @@ from src.workflow_models import TransitionConflictError, GateError, WorkflowTran
 from src.approval_logger import ApprovalLogger
 
 
+class _TransitionVetoed(RuntimeError):
+    """Sentinel raised after a workflow_engine veto has already been recorded.
+
+    The inner `if not transition_result.success` block writes the dead-letter
+    record and the audit log itself, then raises this sentinel. The outer
+    `except Exception` is intentionally NOT re-entered for it (it would
+    overwrite the dead-letter file with a less informative error message).
+    """
+    pass
+
+
 def _get_sync_manager():
     """
     Get or create the ProposalSyncManager instance.
@@ -980,7 +991,10 @@ IMPORTANT INSTRUCTIONS:
                 )
 
                 if not transition_result.success:
-                    # Vetoed! Write dead-letter and raise
+                    # Vetoed! Write dead-letter and raise a sentinel that the
+                    # broad `except Exception` below ignores (otherwise it
+                    # would overwrite the dead-letter with a less useful
+                    # "RuntimeError: Transition blocked: ..." message).
                     blocked_path = self._write_blocked_transition(
                         proposal_id=proposal_id,
                         old_column=old_column,
@@ -993,7 +1007,7 @@ IMPORTANT INSTRUCTIONS:
                         new_column=new_column,
                         error=f"Transition vetoed: {transition_result.error}"
                     )
-                    raise RuntimeError(f"Transition blocked: {transition_result.error}")
+                    raise _TransitionVetoed(f"Transition blocked: {transition_result.error}")
 
                 print(f"[TRANSITION] Workflow engine approved transition to {next_phase}")
 
@@ -1052,8 +1066,12 @@ IMPORTANT INSTRUCTIONS:
                 error=f"GateError: {str(e)}"
             )
             raise
+        except _TransitionVetoed:
+            # Veto path: dead-letter and audit-log already written inside
+            # the if-not-success block. Re-raise without rewriting.
+            raise
         except Exception as e:
-            # Other errors (including veto from workflow_engine)
+            # Other unexpected errors (NOT workflow_engine vetoes).
             import traceback
             self._write_blocked_transition(
                 proposal_id=proposal_id,
