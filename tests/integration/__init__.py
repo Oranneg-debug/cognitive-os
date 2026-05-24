@@ -1,0 +1,1 @@
+"""Integration tests for Phase 5 governance foundation (D1-D10)."""

@@ -44,3 +44,17 @@ dev/failed_routings/*.failed.md
 dev/failed_routings/*.sidecar.json
 dev/.uow_log/
 dev/.uow_staging/
+
+# Test-output artifacts produced by OutputRouter.apply() with timestamp
+# filenames (rule_name_YYYYMMDDThhmmss_*.md). Real proposals use the
+# ARCH-/DEV-/NLST- prefix convention and must NOT match these globs.
+dev/proposals/boardroom_proposal_*.md
+dev/proposals/technical_proposal_*.md
+dev/proposals/council_decision_*.md
+dev/proposals/.tmp_*
+dev/handoffs/handoff_archival_*.md
+dev/decisions/council_decision_*.md
+dev/reports/
+
+# Quarantine for reviewer-rejected work (kept locally, never committed)
+dev/.cline_rejected_phase5/
