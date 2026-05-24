@@ -17,7 +17,7 @@ import hashlib
 import secrets
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, List, Callable, Any, Dict, Tuple
+from typing import Optional, List, Callable, Any, Dict, Set, Tuple
 from contextlib import contextmanager
 
 from src.workflow_models import (
@@ -102,6 +102,10 @@ class GovernanceUnitOfWork:
         # NEW: For generic multi-file staging (A4)
         self._files_to_commit: List[Tuple[Path, str, Path]] = []  # (target_path, content, staged_path)
         self._undo_log_entries: List[Dict[str, Any]] = []
+        # Track per-target staging dirs so ``_rollback`` can clean them up.
+        # ``stage_file`` creates these as siblings of the target file (NOT
+        # under ``self._temp_dir``) for same-filesystem atomic rename.
+        self._staging_dirs: Set[Path] = set()
         # UoW ID for this transaction
         self._uow_id: str = f"uow_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{secrets.token_hex(4)}"
         # Reentrancy: nested `with uow():` on the same instance is treated
@@ -287,6 +291,17 @@ Prior Record Hash: {prior_hash or 'N/A'}
                 shutil.rmtree(self._temp_dir)
             except OSError:
                 pass
+        # ``stage_file`` creates per-target staging dirs as siblings of the
+        # target file (so the eventual ``os.rename`` is same-filesystem
+        # atomic). They live OUTSIDE ``self._temp_dir`` and would orphan on
+        # rollback unless we explicitly clean them up here.
+        for staging_dir in self._staging_dirs:
+            if staging_dir.exists():
+                try:
+                    shutil.rmtree(staging_dir)
+                except OSError:
+                    pass
+        self._staging_dirs.clear()
         self._snapshots_to_commit = []
         self._decisions_to_commit = []
         # NEW: Clean up staged files for generic writes
@@ -320,7 +335,11 @@ Prior Record Hash: {prior_hash or 'N/A'}
         # Create staging directory as sibling of target (same filesystem guarantee)
         staging_dir = target_path.parent / f".uow_{self._uow_id}"
         staging_dir.mkdir(parents=True, exist_ok=True)
-        
+        # Track for rollback cleanup. Multiple stage_file calls for files
+        # under the same parent dir reuse the same staging_dir; set semantics
+        # make that idempotent.
+        self._staging_dirs.add(staging_dir)
+
         # Write to staged path
         filename = target_path.name
         staged_path = staging_dir / filename
