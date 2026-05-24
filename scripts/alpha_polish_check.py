@@ -868,13 +868,26 @@ def gate_phase34_single_phase_writer() -> GateResult:
     """Phase 3+4 V2/G2: Only workflow_engine.py writes the phase: field.
 
     Other modules (dev_route, kanban_processor, proposal_writer) must
-    delegate. Heuristic: grep for ``["']phase["']\\s*:`` writes outside
+    delegate. Heuristic: scan for assignments to a phase field outside
     workflow_engine.
+
+    Filters out false positives that look like phase writes but aren't:
+      - Function-call kwargs:  some_fn(phase="x") — call site, not write
+      - Pydantic Field defaults: phase: Phase = Field(default="x")
+      - Comparisons: if x.phase == "x"
+      - Lookups: d.get("phase"), "phase" in d
+      - String-literal arguments inside ``log_*`` or ``audit_*`` helpers
+        (these are recording the phase, not changing it)
     """
-    # Search for writes that assign to a phase field
+    # Search for writes that assign to a phase field. Two patterns:
+    #   1. Dict/YAML-literal:  "phase": "value"  or  'phase': 'value'
+    #   2. Direct assignment:  phase = "value"   (must be at line start)
     write_patterns = [
-        re.compile(r"""['\"]phase['\"]\s*:\s*['\"]"""),  # YAML/dict literal assignment
-        re.compile(r"""\bphase\s*=\s*['\"]"""),
+        re.compile(r"""['\"]phase['\"]\s*:\s*['\"]"""),
+        # `\bphase\s*=` — but only if it looks like a STATEMENT (no preceding
+        # `(` on the same line). A `(` before the match means we're inside
+        # a function call, which is a kwarg, not a write.
+        re.compile(r"""(?m)^[ \t]*phase\s*=\s*['\"]"""),
     ]
     violators: list[str] = []
     allowed = {"src/workflow_engine.py", "src/workflow_models.py"}
@@ -894,12 +907,33 @@ def gate_phase34_single_phase_writer() -> GateResult:
             continue
         for pat in write_patterns:
             for m in pat.finditer(txt):
-                # Allow if it's clearly a comparison or read, not a write
+                # Pull the surrounding line for context-based filtering
                 line_start = txt.rfind("\n", 0, m.start()) + 1
                 line_end = txt.find("\n", m.end())
                 line = txt[line_start:line_end if line_end >= 0 else None]
+                stripped = line.strip()
+
+                # Comparison / lookup — not a write
                 if "==" in line or ".get(" in line or "in " in line:
                     continue
+                # Pydantic field declaration: `phase: SomeType = Field(...)`
+                # or default value via `= Field(...)`
+                if "Field(" in line or "field(" in line:
+                    continue
+                # Function-call kwarg detection — works across multi-line calls.
+                # Look at the 10 lines immediately preceding the match and count
+                # unclosed parens. If there's at least one open `(` not yet
+                # matched by `)`, we're inside a function call → kwarg, not a write.
+                lookback_chars = txt[max(0, m.start() - 1000):m.start()]
+                open_parens = lookback_chars.count("(")
+                close_parens = lookback_chars.count(")")
+                if open_parens > close_parens:
+                    # We are syntactically inside an open function call.
+                    continue
+                # Comment line
+                if stripped.startswith("#"):
+                    continue
+
                 violators.append(f"{rel}:{txt.count(chr(10), 0, m.start())+1}")
     return GateResult(
         "phase34_single_phase_writer",
