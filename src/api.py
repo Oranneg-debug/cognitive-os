@@ -713,7 +713,7 @@ def process_prompt(request: PromptRequest):
         
         # 2. Route synthesis via OutputRouter (A1: replace inline string-matching)
         decision = output_router.route(result)
-        path = output_router.apply(decision, result)
+        path = output_router.apply(result, decision)
         
         # 3. Get task_id for the response
         task_id = orchestrator.memory.generate_task_id(request.prompt)
