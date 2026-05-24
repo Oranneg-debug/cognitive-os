@@ -1,11 +1,13 @@
 import asyncio
 import json
+import sqlite3
 import sys
 import uvicorn
 import os
 import re
 import yaml
 import psutil
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional, Union, Dict, Any
 from fastapi import FastAPI, Request, HTTPException
@@ -21,10 +23,101 @@ from src.orchestrator import Orchestrator
 from src.obsidian_writer import ObsidianWriter
 from src.paths import VAULT_ROOT, DEV_DIR
 from src.uow_recovery import run_recovery
+from src.approval_logger import ApprovalLogger
 
 from fastapi.middleware.cors import CORSMiddleware
 
-app = FastAPI(title="Cognitive OS API")
+
+def _validate_failed_routings_dir() -> None:
+    """B1: Ensure dev/failed_routings/ exists, create if missing."""
+    failed_routings = DEV_DIR / "failed_routings"
+    if not failed_routings.exists():
+        failed_routings.mkdir(parents=True, exist_ok=True)
+        print(f"[STARTUP] Created dev/failed_routings/ directory")
+
+
+def _validate_routing_rules() -> None:
+    """B2: Validate config/routing_rules.yaml loads cleanly."""
+    try:
+        load_routing_rules()
+        print("[STARTUP] routing_rules.yaml validated")
+    except Exception as e:
+        raise RuntimeError(
+            f"Failed to load routing_rules.yaml. FastAPI refusing to start. "
+            f"Error: {e}"
+        ) from e
+
+
+def _validate_state_machine() -> None:
+    """B3: Validate config/state_machine.yaml loads cleanly via yaml."""
+    state_machine_path = Path(__file__).resolve().parent.parent / "config" / "state_machine.yaml"
+    if not state_machine_path.exists():
+        raise FileNotFoundError(f"state_machine.yaml not found: {state_machine_path}")
+    try:
+        with open(state_machine_path, 'r', encoding='utf-8') as f:
+            yaml.safe_load(f)
+        print("[STARTUP] state_machine.yaml validated")
+    except Exception as e:
+        raise RuntimeError(
+            f"Failed to load state_machine.yaml. FastAPI refusing to start. "
+            f"Error: {e}"
+        ) from e
+
+
+def _validate_approval_logger_index() -> None:
+    """B4: Verify composite index exists in approval log SQLite."""
+    try:
+        logger = ApprovalLogger()
+        conn = sqlite3.connect(str(logger.db_path))
+        try:
+            cursor = conn.cursor()
+            # Check if the composite index exists
+            cursor.execute("""
+                SELECT name FROM sqlite_master 
+                WHERE type='index' AND name='idx_approval_log_composite'
+            """)
+            result = cursor.fetchone()
+            if not result:
+                raise RuntimeError(
+                    "Composite index idx_approval_log_composite missing in approval_log table. "
+                    "Run ApprovalLogger initialization first."
+                )
+            print("[STARTUP] ApprovalLogger composite index verified")
+        finally:
+            conn.close()
+    except Exception as e:
+        raise RuntimeError(
+            f"ApprovalLogger validation failed. FastAPI refusing to start. "
+            f"Error: {e}"
+        ) from e
+
+
+def _run_startup_validation() -> None:
+    """Run all Section B boot-time validations."""
+    print("[STARTUP] Running boot-time validation...")
+    _validate_failed_routings_dir()
+    _validate_routing_rules()
+    _validate_state_machine()
+    _validate_approval_logger_index()
+    print("[STARTUP] Boot-time validation completed.")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """FastAPI lifespan: boot-time validation (Section B) + UoW recovery (A4).
+
+    Runs only when uvicorn starts the server, NOT on `import src.api`.
+    This keeps tests, scripts, and tooling from triggering full startup side effects.
+    """
+    _run_startup_validation()
+    print("[STARTUP] Running UoW recovery...")
+    run_recovery()
+    print("[STARTUP] UoW recovery completed.")
+    yield
+    # No shutdown actions required at this time.
+
+
+app = FastAPI(title="Cognitive OS API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -786,11 +879,6 @@ def get_sync_history(limit: int = 10):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error getting sync history: {e}")
 
-
-# Startup hook: run UoW recovery on every server restart
-print("[STARTUP] Running UoW recovery...")
-run_recovery()
-print("[STARTUP] UoW recovery completed.")
 
 # Mount the static directory for the dashboard AFTER all other API routes
 app.mount("/", StaticFiles(directory=DASHBOARD_DIR, html=True), name="static")
