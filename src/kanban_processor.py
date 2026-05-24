@@ -15,7 +15,9 @@ import os
 import json
 import re
 import time
-from datetime import datetime
+import asyncio
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
 import yaml
 
@@ -34,6 +36,9 @@ import json
 
 from src.sync_check import trigger_sync_check
 from src.paths import VAULT_ROOT
+from src.workflow_engine import WorkflowEngine, TransitionRequest
+from src.workflow_models import TransitionConflictError, GateError, WorkflowTransitionResult, WorkflowPhase
+from src.approval_logger import ApprovalLogger
 
 
 def _get_sync_manager():
@@ -72,22 +77,13 @@ def _load_status_mapping_config() -> dict:
                 "finalized": {"phase_key": "finalized", "status": "released", "order": 4},
                 "deployed": {"phase_key": "deployed", "status": "live", "order": 5}
             },
-            "column_order": ["backlog", "proposal", "beta testing", "alpha polish", "finalized", "deployed"],
-            "transition_rules": {
-                "backlog": ["proposal"],
-                "proposal": ["beta testing", "deployed"],
-                "beta testing": ["alpha polish"],
-                "alpha polish": ["finalized"],
-                "finalized": ["deployed"],
-                "deployed": []
-            }
+            "column_order": ["backlog", "proposal", "beta testing", "alpha polish", "finalized", "deployed"]
         }
 
 
 _STATUS_CONFIG = _load_status_mapping_config()
 DEFAULT_STATUS_MAP = _STATUS_CONFIG.get("status_map", {})
 DEFAULT_COLUMN_ORDER = _STATUS_CONFIG.get("column_order", [])
-DEFAULT_TRANSITION_RULES = _STATUS_CONFIG.get("transition_rules", {})
 
 
 class KanbanProcessor:
@@ -134,60 +130,71 @@ class KanbanProcessor:
         
         self.dev_manager = DevRouteManager()
         self.cache = self._load_cache()
-        self.transition_rules = self._load_transition_rules()
-    
-    def _load_transition_rules(self) -> Dict[str, List[str]]:
-        """
-        Load transition rules that define which columns can be moved to.
+        self.workflow_engine = WorkflowEngine()
         
-        Returns:
-            dict: Column names mapped to list of allowed target columns
-        """
-        # Default rules: only move forward in the workflow
-        return {
-            "backlog": ["proposal"],
-            "proposal": ["beta testing", "deployed"],  # Can skip phases with explicit marker
-            "beta testing": ["alpha polish"],
-            "alpha polish": ["finalized"],
-            "finalized": ["deployed"],
-            "deployed": []  # Final state - no outgoing transitions
-        }
+        # Forward/backward check is now inline in _update_proposal_phase()
     
-    def validate_transition(self, old_column: str, new_column: str) -> Tuple[bool, Optional[str]]:
+    def _write_blocked_transition(self, proposal_id: str, old_column: str, new_column: str, error: str) -> Path:
         """
-        Validate if a card movement is allowed based on transition rules.
+        Write a blocked transition record to dev/failed_routings/<id>_blocked.json.
         
         Args:
-            old_column: Current column position
-            new_column: Target column position
+            proposal_id: The proposal ID
+            old_column: Source column
+            new_column: Target column
+            error: Reason for blocking
             
         Returns:
-            tuple: (is_valid: bool, reason: str or None)
+            Path to the created file
         """
-        # Same column = no change, always valid
-        if old_column == new_column:
-            return True, None
+        failed_dir = Path(self.cache_dir) / "failed_routings"
+        failed_dir.mkdir(parents=True, exist_ok=True)
         
-        # If we don't know the old position, allow it (first time seeing card)
-        if not old_column or old_column == "unknown":
-            return True, None
+        blocked_record = {
+            "proposal_id": proposal_id,
+            "old_column": old_column,
+            "new_column": new_column,
+            "blocked_at": datetime.now(timezone.utc).isoformat(),
+            "reason": error
+        }
         
-        # Check if moving backward (only allow with explicit marker like "🔄")
-        old_info = self.columns.get(old_column, {})
-        new_info = self.columns.get(new_column, {})
+        output_path = failed_dir / f"{proposal_id}_blocked.json"
+        with open(output_path, 'w', encoding='utf-8') as f:
+            json.dump(blocked_record, f, indent=2)
         
-        old_order = old_info.get("order", 999)
-        new_order = new_info.get("order", -1)
+        print(f"[BLOCKED] Transition blocked for {proposal_id}: {error}")
+        print(f"[BLOCKED] Record saved to: {output_path}")
         
-        if new_order < old_order:
-            return False, "Cannot move cards backward in the workflow (only forward progress allowed)"
+        return output_path
+    
+    def _audit_log_block(self, proposal_id: str, old_column: str, new_column: str, error: str) -> int:
+        """
+        Log a blocked transition to the approval log.
         
-        # Check transition rules
-        allowed_targets = self.transition_rules.get(old_column, [])
-        if allowed_targets and new_column not in allowed_targets:
-            return False, f"Direct transition from '{old_column}' to '{new_column}' is not allowed"
-        
-        return True, None
+        Args:
+            proposal_id: The proposal ID
+            old_column: Source column
+            new_column: Target column
+            error: Reason for blocking
+            
+        Returns:
+            The entry ID from the approval logger
+        """
+        try:
+            approval_logger = ApprovalLogger()
+            entry_id = approval_logger.log_approval(
+                proposal_id=proposal_id,
+                phase="transition_blocked",
+                status="rejected",
+                approver="KanbanProcessor",
+                reason=f"Transition from '{old_column}' to '{new_column}' blocked: {error}",
+                decision_log_path=None
+            )
+            print(f"[AUDIT] Blocked transition logged for {proposal_id}, entry_id={entry_id}")
+            return entry_id
+        except Exception as e:
+            print(f"[AUDIT ERROR] Failed to log block for {proposal_id}: {e}")
+            return -1
     
     def _find_vault_root(self) -> str:
         """
@@ -940,6 +947,53 @@ IMPORTANT INSTRUCTIONS:
         print(f"Phase change needed: {current_phase} → {next_phase}")
 
         try:
+            # ----------------------------------------------------------------
+            # Step 1: Ask workflow_engine if this transition is allowed (G3/T2 compliance)
+            # ----------------------------------------------------------------
+            # Parse YAML to get current phase/status/substatus/approver/severity/depends_on
+            frontmatter, _, _ = self._parse_yaml_frontmatter(content)
+            if not frontmatter:
+                raise ValueError(f"No frontmatter in {proposal_file}")
+            
+            # Compute semantic-only version_hash using workflow_engine's internal method
+            # The hash basis is: {phase, status, substatus, approver, severity, depends_on}
+            version_hash = self.workflow_engine._compute_version_hash(frontmatter)
+            
+            # Call workflow_engine.transition() - wrap async call in sync context
+            transition_result: WorkflowTransitionResult = asyncio.run(
+                self.workflow_engine.transition(
+                    TransitionRequest(
+                        proposal_id=proposal_id,
+                        target_phase=WorkflowPhase(next_phase),
+                        target_substatus=None,
+                        approver="KanbanProcessor",
+                        reason=f"Card moved from {old_column} to {new_column}",
+                        version_hash=version_hash
+                    )
+                )
+            )
+            
+            if not transition_result.success:
+                # Vetoed! Write dead-letter and raise
+                blocked_path = self._write_blocked_transition(
+                    proposal_id=proposal_id,
+                    old_column=old_column,
+                    new_column=new_column,
+                    error=f"Transition vetoed: {transition_result.error or 'Unknown error'}"
+                )
+                self._audit_log_block(
+                    proposal_id=proposal_id,
+                    old_column=old_column,
+                    new_column=new_column,
+                    error=f"Transition vetoed: {transition_result.error}"
+                )
+                raise RuntimeError(f"Transition blocked: {transition_result.error}")
+            
+            print(f"[TRANSITION] Workflow engine approved transition to {next_phase}")
+
+            # ----------------------------------------------------------------
+            # Step 2: Call orchestrator to run council/meeting
+            # ----------------------------------------------------------------
             from orchestrator import Orchestrator
             orch = Orchestrator()
             result_msg = orch.continue_development_lifecycle(proposal_id, next_phase, content)
@@ -962,17 +1016,53 @@ IMPORTANT INSTRUCTIONS:
                 "old_phase": current_phase,
                 "new_phase": next_phase
             }
+        except TransitionConflictError as e:
+            # Version hash mismatch — write dead-letter + audit-log
+            self._write_blocked_transition(
+                proposal_id=proposal_id,
+                old_column=old_column,
+                new_column=new_column,
+                error=f"Version conflict: {str(e)}"
+            )
+            self._audit_log_block(
+                proposal_id=proposal_id,
+                old_column=old_column,
+                new_column=new_column,
+                error=f"VersionConflict: {str(e)}"
+            )
+            raise
+        except GateError as e:
+            # Gate check failed
+            self._write_blocked_transition(
+                proposal_id=proposal_id,
+                old_column=old_column,
+                new_column=new_column,
+                error=f"Gate failed: {str(e)}"
+            )
+            self._audit_log_block(
+                proposal_id=proposal_id,
+                old_column=old_column,
+                new_column=new_column,
+                error=f"GateError: {str(e)}"
+            )
+            raise
         except Exception as e:
-            # Something went wrong — flag for human review
-            self._set_proposal_processing_status(proposal_file, "review")
-            self._write_card_status_to_board(proposal_id, "review")
-            return {
-                "status": "error",
-                "message": f"Failed to continue lifecycle: {str(e)}",
-                "proposal_id": proposal_id,
-                "old_phase": current_phase,
-                "new_phase": next_phase
-            }
+            # Other errors (including veto from workflow_engine)
+            import traceback
+            self._write_blocked_transition(
+                proposal_id=proposal_id,
+                old_column=old_column,
+                new_column=new_column,
+                error=f"{type(e).__name__}: {str(e)}"
+            )
+            self._audit_log_block(
+                proposal_id=proposal_id,
+                old_column=old_column,
+                new_column=new_column,
+                error=f"{type(e).__name__}: {str(e)}"
+            )
+            # Re-raise original exception
+            raise
     
     def _get_proposal_current_phase(self, content: str) -> str:
         """Extract current phase from proposal file."""
