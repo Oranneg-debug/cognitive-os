@@ -487,7 +487,7 @@ Output your final blueprint in the specified JSON format for your role.""",
         # A2: Route the synthesis via OutputRouter if injected
         if self.output_router is not None:
             decision = self.output_router.route(report)
-            return self.output_router.apply(decision, report)
+            return self.output_router.apply(report, decision)  # apply(content, decision)
         
         return report
 
