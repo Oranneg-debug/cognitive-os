@@ -126,6 +126,14 @@ class Orchestrator:
         self.output_router = output_router  # A2: Direct injection from api.py
         # Initialize config on startup
         get_config()
+
+        # C1 (Phase 5): feature flag — if OutputRouter is disabled, force legacy
+        # ObsidianWriter path by clearing the injected router.
+        from src.integration_flags import is_output_router_enabled
+        if not is_output_router_enabled():
+            if self.output_router is not None:
+                print("[LEGACY] integration.output_router_enabled=false; reverting Orchestrator to ObsidianWriter path")
+            self.output_router = None
         
         # Ensure a clean slate on startup by flushing ALL models (including embedder)
         print("🧹 Performing startup VRAM flush (Absolute)...")

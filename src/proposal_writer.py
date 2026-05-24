@@ -27,6 +27,7 @@ from src.schema_validator import validate_proposal_yaml, SchemaValidationError
 from src.handoff_vault import HandoffVault
 from src.approval_logger import ApprovalLogger
 from src.governance_unit_of_work import GovernanceUnitOfWork
+from src.integration_flags import is_governance_uow_enabled
 
 
 class ProposalWriter:
@@ -159,15 +160,27 @@ class ProposalWriter:
             if body_start > 0:
                 content = content[:body_start + 5] + source_section + content[body_start + 5:]
 
-        # Use GovernanceUnitOfWork for atomic multi-file writes
-        with GovernanceUnitOfWork() as uow:
-            # Stage proposal file (backend directory)
-            filename = f"{self.proposals_dir}/{proposal_id}_PROPOSAL.md"
-            uow.stage_file(Path(filename), content)
+        # Use GovernanceUnitOfWork for atomic multi-file writes if enabled
+        flags = get_integration_flags()
+        
+        if flags['governance_uow_enabled']:
+            with GovernanceUnitOfWork() as uow:
+                # Stage proposal file (backend directory)
+                filename = f"{self.proposals_dir}/{proposal_id}_PROPOSAL.md"
+                uow.stage_file(Path(filename), content)
 
-            # Stage vault copy (Obsidian sync directory)
+                # Stage vault copy (Obsidian sync directory)
+                vault_filename = filename.replace(self.proposals_dir, self.vault_proposals_dir)
+                uow.stage_file(Path(vault_filename), content)
+        else:
+            # Legacy fallback: direct file writes
+            print("[WARNING] GovernanceUnitOfWork is disabled - using legacy direct file writes")
+            filename = f"{self.proposals_dir}/{proposal_id}_PROPOSAL.md"
+            Path(filename).write_text(content, encoding='utf-8')
+
             vault_filename = filename.replace(self.proposals_dir, self.vault_proposals_dir)
-            uow.stage_file(Path(vault_filename), content)
+            Path(vault_filename).parent.mkdir(parents=True, exist_ok=True)
+            Path(vault_filename).write_text(content, encoding='utf-8')
 
         # Extract a human-readable title for the Kanban card metadata
         card_title = self._extract_card_title(user_input)

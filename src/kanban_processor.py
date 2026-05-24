@@ -950,46 +950,52 @@ IMPORTANT INSTRUCTIONS:
             # ----------------------------------------------------------------
             # Step 1: Ask workflow_engine if this transition is allowed (G3/T2 compliance)
             # ----------------------------------------------------------------
-            # Parse YAML to get current phase/status/substatus/approver/severity/depends_on
-            frontmatter, _, _ = self._parse_yaml_frontmatter(content)
-            if not frontmatter:
-                raise ValueError(f"No frontmatter in {proposal_file}")
-            
-            # Compute semantic-only version_hash using workflow_engine's internal method
-            # The hash basis is: {phase, status, substatus, approver, severity, depends_on}
-            version_hash = self.workflow_engine._compute_version_hash(frontmatter)
-            
-            # Call workflow_engine.transition() - wrap async call in sync context
-            transition_result: WorkflowTransitionResult = asyncio.run(
-                self.workflow_engine.transition(
-                    TransitionRequest(
-                        proposal_id=proposal_id,
-                        target_phase=WorkflowPhase(next_phase),
-                        target_substatus=None,
-                        approver="KanbanProcessor",
-                        reason=f"Card moved from {old_column} to {new_column}",
-                        version_hash=version_hash
+            # C1 (Phase 5): feature flag — if WorkflowEngine is disabled, skip
+            # the guard and proceed directly to Step 2 (legacy behavior).
+            from src.integration_flags import is_workflow_engine_enabled
+            if not is_workflow_engine_enabled():
+                print(f"[LEGACY] integration.workflow_engine_enabled=false; skipping transition guard for {proposal_id}")
+            else:
+                # Parse YAML to get current phase/status/substatus/approver/severity/depends_on
+                frontmatter, _, _ = self._parse_yaml_frontmatter(content)
+                if not frontmatter:
+                    raise ValueError(f"No frontmatter in {proposal_file}")
+
+                # Compute semantic-only version_hash using workflow_engine's internal method
+                # The hash basis is: {phase, status, substatus, approver, severity, depends_on}
+                version_hash = self.workflow_engine._compute_version_hash(frontmatter)
+
+                # Call workflow_engine.transition() - wrap async call in sync context
+                transition_result: WorkflowTransitionResult = asyncio.run(
+                    self.workflow_engine.transition(
+                        TransitionRequest(
+                            proposal_id=proposal_id,
+                            target_phase=WorkflowPhase(next_phase),
+                            target_substatus=None,
+                            approver="KanbanProcessor",
+                            reason=f"Card moved from {old_column} to {new_column}",
+                            version_hash=version_hash
+                        )
                     )
                 )
-            )
-            
-            if not transition_result.success:
-                # Vetoed! Write dead-letter and raise
-                blocked_path = self._write_blocked_transition(
-                    proposal_id=proposal_id,
-                    old_column=old_column,
-                    new_column=new_column,
-                    error=f"Transition vetoed: {transition_result.error or 'Unknown error'}"
-                )
-                self._audit_log_block(
-                    proposal_id=proposal_id,
-                    old_column=old_column,
-                    new_column=new_column,
-                    error=f"Transition vetoed: {transition_result.error}"
-                )
-                raise RuntimeError(f"Transition blocked: {transition_result.error}")
-            
-            print(f"[TRANSITION] Workflow engine approved transition to {next_phase}")
+
+                if not transition_result.success:
+                    # Vetoed! Write dead-letter and raise
+                    blocked_path = self._write_blocked_transition(
+                        proposal_id=proposal_id,
+                        old_column=old_column,
+                        new_column=new_column,
+                        error=f"Transition vetoed: {transition_result.error or 'Unknown error'}"
+                    )
+                    self._audit_log_block(
+                        proposal_id=proposal_id,
+                        old_column=old_column,
+                        new_column=new_column,
+                        error=f"Transition vetoed: {transition_result.error}"
+                    )
+                    raise RuntimeError(f"Transition blocked: {transition_result.error}")
+
+                print(f"[TRANSITION] Workflow engine approved transition to {next_phase}")
 
             # ----------------------------------------------------------------
             # Step 2: Call orchestrator to run council/meeting

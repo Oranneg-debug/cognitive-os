@@ -12,6 +12,7 @@ from typing import Dict, Optional
 
 from src.paths import VAULT_ROOT, HANDOFFS_DIR
 from src.governance_unit_of_work import GovernanceUnitOfWork
+from src.integration_flags import is_governance_uow_enabled
 
 
 class HandoffWriter:
@@ -174,13 +175,22 @@ class HandoffWriter:
             f'tasks_completed: 0\ntasks_total: {tasks_count}'
         )
 
-        # Use GovernanceUnitOfWork for atomic multi-file writes (vault + source handoff)
+        # Use GovernanceUnitOfWork for atomic multi-file writes if enabled
+        from src.integration_flags import get_integration_flags
+        flags = get_integration_flags()
+        
         vault_path = os.path.join(self.vault_handoffs_dir, filename)
         source_path = os.path.join(self.source_handoffs_dir, filename)
 
-        with GovernanceUnitOfWork() as uow:
-            uow.stage_file(Path(vault_path), content)
-            uow.stage_file(Path(source_path), content)
+        if flags['governance_uow_enabled']:
+            with GovernanceUnitOfWork() as uow:
+                uow.stage_file(Path(vault_path), content)
+                uow.stage_file(Path(source_path), content)
+        else:
+            # Legacy fallback: direct file writes
+            print("[WARNING] GovernanceUnitOfWork is disabled - using legacy direct file writes")
+            Path(vault_path).write_text(content, encoding='utf-8')
+            Path(source_path).write_text(content, encoding='utf-8')
 
         print(f"[HANDOFF] Beta handoff saved → vault: {vault_path}")
         print(f"[HANDOFF] Beta handoff saved → source: {source_path}")
@@ -367,13 +377,22 @@ class HandoffWriter:
             f'tasks_completed: 0\ntasks_total: {tasks_count}'
         )
 
-        # Use GovernanceUnitOfWork for atomic multi-file writes (vault + source handoff)
+        # Use GovernanceUnitOfWork for atomic multi-file writes if enabled
+        from src.integration_flags import get_integration_flags
+        flags = get_integration_flags()
+        
         vault_path = os.path.join(self.vault_handoffs_dir, filename)
         source_path = os.path.join(self.source_handoffs_dir, filename)
 
-        with GovernanceUnitOfWork() as uow:
-            uow.stage_file(Path(vault_path), content)
-            uow.stage_file(Path(source_path), content)
+        if flags['governance_uow_enabled']:
+            with GovernanceUnitOfWork() as uow:
+                uow.stage_file(Path(vault_path), content)
+                uow.stage_file(Path(source_path), content)
+        else:
+            # Legacy fallback: direct file writes
+            print("[WARNING] GovernanceUnitOfWork is disabled - using legacy direct file writes")
+            Path(vault_path).write_text(content, encoding='utf-8')
+            Path(source_path).write_text(content, encoding='utf-8')
 
         print(f"[HANDOFF] Alpha handoff saved → vault: {vault_path}")
         print(f"[HANDOFF] Alpha handoff saved → source: {source_path}")

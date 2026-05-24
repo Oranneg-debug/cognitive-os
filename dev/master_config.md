@@ -1,10 +1,18 @@
 ---
 version: 1.1.0
-last_updated: "2026-05-19"
+last_updated: "2026-05-24"
 description: "Master configuration for all AI models and roles in the Cognitive OS. Edit the YAML block below to dynamically update system behavior."
 ---
 
 ```yaml
+# Integration Feature Flags (Phase 5, CSTR-PHASE5-V2: default to true).
+# Set any flag to false to revert that subsystem to legacy behavior.
+# Read once at startup and cached; restart the API to pick up changes.
+integration:
+  output_router_enabled: true
+  workflow_engine_enabled: true
+  governance_uow_enabled: true
+
 models:
   deepseek-coder-v2-lite-instruct:
     context_window: 128000
