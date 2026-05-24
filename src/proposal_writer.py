@@ -27,7 +27,7 @@ from src.schema_validator import validate_proposal_yaml, SchemaValidationError
 from src.handoff_vault import HandoffVault
 from src.approval_logger import ApprovalLogger
 from src.governance_unit_of_work import GovernanceUnitOfWork
-from src.integration_flags import is_governance_uow_enabled
+from src.integration_flags import get_integration_flags, is_governance_uow_enabled
 
 
 class ProposalWriter:
