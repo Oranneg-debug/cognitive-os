@@ -35,3 +35,12 @@ Thumbs.db
 # Logs and scratch
 *.log
 scratch/
+
+# Runtime ephemera — not source (A4: Governance Foundation hardening)
+alpha_output.txt
+beta_output.txt
+*_output.txt
+dev/failed_routings/*.failed.md
+dev/failed_routings/*.sidecar.json
+dev/.uow_log/
+dev/.uow_staging/

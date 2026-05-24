@@ -12,9 +12,12 @@ from __future__ import annotations
 
 import os
 import shutil
+import json
+import hashlib
+import secrets
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, List, Callable, Any
+from typing import Optional, List, Callable, Any, Dict, Tuple
 from contextlib import contextmanager
 
 from src.workflow_models import (
@@ -25,6 +28,9 @@ from src.workflow_models import (
     VaultIntegrityError,
     ApprovalLogError,
 )
+
+# Configuration
+UOW_LOG_DIR = Path("dev/.uow_log")
 from src.handoff_vault import HandoffVault
 from src.approval_logger import ApprovalLogger
 
@@ -93,6 +99,11 @@ class GovernanceUnitOfWork:
         self._temp_dir: Optional[Path] = None
         self._snapshots_to_commit: List[tuple] = []
         self._decisions_to_commit: List[tuple] = []
+        # NEW: For generic multi-file staging (A4)
+        self._files_to_commit: List[Tuple[Path, str, Path]] = []  # (target_path, content, staged_path)
+        self._undo_log_entries: List[Dict[str, Any]] = []
+        # UoW ID for this transaction
+        self._uow_id: str = f"uow_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{secrets.token_hex(4)}"
         # Reentrancy: nested `with uow():` on the same instance is treated
         # as a savepoint — only the outermost ``__exit__`` commits or
         # rolls back. Standard UoW behaviour.
@@ -245,38 +256,6 @@ Prior Record Hash: {prior_hash or 'N/A'}
             f"{record.proposal_id}:{record.approver}:{record.decision}".encode()
         ).hexdigest()
     
-    def _commit(self) -> None:
-        """Commit all queued operations atomically.
-
-        Delegates to ``HandoffVault.snapshot`` and ``ApprovalLogger.log_decision``
-        so writes go through the canonical code paths (no duplicate logic).
-        """
-        if not self.vault or not self.logger:
-            raise RuntimeError("Unit of work not started")
-
-        committed_artifacts: List[ArtifactVersion] = []
-
-        for proposal, phase, _temp_path in self._snapshots_to_commit:
-            try:
-                artifact = self.vault.snapshot(proposal, phase)
-            except Exception as e:
-                raise VaultIntegrityError(
-                    proposal_id=proposal.proposal_id,
-                    reason=f"Failed to commit snapshot: {e}",
-                ) from e
-            committed_artifacts.append(artifact)
-
-        for record, _entry in self._decisions_to_commit:
-            try:
-                self.logger.log_decision(record)
-            except Exception as e:
-                raise ApprovalLogError(
-                    proposal_id=record.proposal_id,
-                    reason=f"Failed to commit decision: {e}",
-                ) from e
-
-        self._committed_artifacts = committed_artifacts
-
     def restore(self, sha256: str) -> Optional[ValidatedProposal]:
         """Restore a proposal by its SHA256.
 
@@ -310,6 +289,149 @@ Prior Record Hash: {prior_hash or 'N/A'}
                 pass
         self._snapshots_to_commit = []
         self._decisions_to_commit = []
+        # NEW: Clean up staged files for generic writes
+        self._files_to_commit = []
+        self._undo_log_entries = []
+    
+    def stage_file(self, target_path: Path, content: str) -> None:
+        """
+        Stage a file for atomic commit.
+        
+        The file is written to a staging directory that's a sibling of the target,
+        ensuring same-filesystem atomic rename via os.rename().
+        
+        Args:
+            target_path: Final destination path for the file
+            content: File content to write
+        """
+        # Compute hash of staged content (for undo log)
+        content_bytes = content.encode("utf-8")
+        sha256_staged = hashlib.sha256(content_bytes).hexdigest()
+        
+        # Get pre-existing hash if target exists (None if file didn't exist)
+        sha256_pre: Optional[str] = None
+        if target_path.exists():
+            try:
+                with open(target_path, "rb") as f:
+                    sha256_pre = hashlib.sha256(f.read()).hexdigest()
+            except OSError:
+                sha256_pre = None
+        
+        # Create staging directory as sibling of target (same filesystem guarantee)
+        staging_dir = target_path.parent / f".uow_{self._uow_id}"
+        staging_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Write to staged path
+        filename = target_path.name
+        staged_path = staging_dir / filename
+        with open(staged_path, "wb") as f:
+            f.write(content_bytes)
+        
+        # Queue for commit
+        self._files_to_commit.append((target_path, content, staged_path))
+        
+        # Record in undo log entries
+        self._undo_log_entries.append({
+            "target_path": str(target_path),
+            "staged_path": str(staged_path),
+            "sha256_pre": sha256_pre,
+            "sha256_staged": sha256_staged,
+        })
+    
+    def _compute_file_hash(self, file_path: Path) -> Optional[str]:
+        """Compute SHA256 of a file, return None if file doesn't exist."""
+        if not file_path.exists():
+            return None
+        try:
+            with open(file_path, "rb") as f:
+                return hashlib.sha256(f.read()).hexdigest()
+        except OSError:
+            return None
+    
+    def _write_undo_log(self) -> Path:
+        """
+        Write undo log to dev/.uow_log/ before commit.
+        
+        Returns the path to the written undo log.
+        """
+        UOW_LOG_DIR.mkdir(parents=True, exist_ok=True)
+        
+        undo_data = {
+            "uow_id": self._uow_id,
+            "started_at": datetime.now().isoformat(),
+            "operation": "generic",
+            "staged_dir": str(self._files_to_commit[0][2].parent) if self._files_to_commit else "",
+            "files": self._undo_log_entries,
+            "status": "staged",
+        }
+        
+        undo_path = UOW_LOG_DIR / f"{self._uow_id}.undo.json"
+        with open(undo_path, "w", encoding="utf-8") as f:
+            json.dump(undo_data, f, indent=2)
+        
+        return undo_path
+    
+    def _commit(self) -> None:
+        """Commit all queued operations atomically.
+
+        Delegates to ``HandoffVault.snapshot`` and ``ApprovalLogger.log_decision``
+        so writes go through the canonical code paths (no duplicate logic).
+        
+        NEW: Also commits staged generic files via atomic os.rename().
+        """
+        if not self.vault or not self.logger:
+            raise RuntimeError("Unit of work not started")
+
+        committed_artifacts: List[ArtifactVersion] = []
+
+        for proposal, phase, _temp_path in self._snapshots_to_commit:
+            try:
+                artifact = self.vault.snapshot(proposal, phase)
+            except Exception as e:
+                raise VaultIntegrityError(
+                    proposal_id=proposal.proposal_id,
+                    reason=f"Failed to commit snapshot: {e}",
+                ) from e
+            committed_artifacts.append(artifact)
+
+        for record, _entry in self._decisions_to_commit:
+            try:
+                self.logger.log_decision(record)
+            except Exception as e:
+                raise ApprovalLogError(
+                    proposal_id=record.proposal_id,
+                    reason=f"Failed to commit decision: {e}",
+                ) from e
+
+        self._committed_artifacts = committed_artifacts
+        
+        # NEW: Commit staged generic files via atomic rename
+        # First write undo log before any commits (for crash recovery)
+        if self._files_to_commit:
+            undo_path = self._write_undo_log()
+        
+        for target_path, content, staged_path in self._files_to_commit:
+            try:
+                # Atomic rename (same filesystem guaranteed by staging_dir design)
+                os.rename(staged_path, target_path)
+            except OSError as e:
+                raise RuntimeError(
+                    f"Failed to commit file {target_path}: {e}"
+                ) from e
+        
+        # Update undo log status to committed
+        if self._files_to_commit:
+            try:
+                undo_path = UOW_LOG_DIR / f"{self._uow_id}.undo.json"
+                if undo_path.exists():
+                    with open(undo_path, "r", encoding="utf-8") as f:
+                        undo_data = json.load(f)
+                    undo_data["status"] = "committed"
+                    with open(undo_path, "w", encoding="utf-8") as f:
+                        json.dump(undo_data, f, indent=2)
+            except (OSError, json.JSONDecodeError):
+                # Log but don't fail - idempotent cleanup will handle it
+                pass
 
 
 @contextmanager

@@ -20,6 +20,7 @@ from src.routing_rules_schema import load_routing_rules
 from src.orchestrator import Orchestrator
 from src.obsidian_writer import ObsidianWriter
 from src.paths import VAULT_ROOT, DEV_DIR
+from src.uow_recovery import run_recovery
 
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -785,6 +786,11 @@ def get_sync_history(limit: int = 10):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error getting sync history: {e}")
 
+
+# Startup hook: run UoW recovery on every server restart
+print("[STARTUP] Running UoW recovery...")
+run_recovery()
+print("[STARTUP] UoW recovery completed.")
 
 # Mount the static directory for the dashboard AFTER all other API routes
 app.mount("/", StaticFiles(directory=DASHBOARD_DIR, html=True), name="static")

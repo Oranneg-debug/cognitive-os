@@ -9,6 +9,7 @@ import glob
 import re
 import uuid
 from datetime import datetime
+from pathlib import Path
 from typing import Dict, Optional
 
 from src.paths import (
@@ -25,6 +26,7 @@ from src.workflow_models import ValidatedProposal, Severity, WorkflowPhase
 from src.schema_validator import validate_proposal_yaml, SchemaValidationError
 from src.handoff_vault import HandoffVault
 from src.approval_logger import ApprovalLogger
+from src.governance_unit_of_work import GovernanceUnitOfWork
 
 
 class ProposalWriter:
@@ -157,22 +159,20 @@ class ProposalWriter:
             if body_start > 0:
                 content = content[:body_start + 5] + source_section + content[body_start + 5:]
 
-        # Save proposal to file - clean format: DEV-YYYYMMDD-HHMMSS-XXXX_PROPOSAL.md
-        filename = f"{self.proposals_dir}/{proposal_id}_PROPOSAL.md"
+        # Use GovernanceUnitOfWork for atomic multi-file writes
+        with GovernanceUnitOfWork() as uow:
+            # Stage proposal file (backend directory)
+            filename = f"{self.proposals_dir}/{proposal_id}_PROPOSAL.md"
+            uow.stage_file(Path(filename), content)
 
-        with open(filename, 'w', encoding='utf-8') as f:
-            f.write(content)
-
-        # Also save to vault directory for Obsidian sync
-        vault_filename = filename.replace(self.proposals_dir, self.vault_proposals_dir)
-        os.makedirs(os.path.dirname(vault_filename), exist_ok=True)
-        with open(vault_filename, 'w', encoding='utf-8') as f:
-            f.write(content)
+            # Stage vault copy (Obsidian sync directory)
+            vault_filename = filename.replace(self.proposals_dir, self.vault_proposals_dir)
+            uow.stage_file(Path(vault_filename), content)
 
         # Extract a human-readable title for the Kanban card metadata
         card_title = self._extract_card_title(user_input)
 
-        # Auto-add card to Kanban Board in vault
+        # Auto-add card to Kanban Board in vault (OUTSIDE UoW per A4 design)
         self._add_card_to_kanban(proposal_id, card_title, kanban_card_id, source_note=source_note)
 
         proposal_data = {

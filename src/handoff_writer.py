@@ -7,9 +7,11 @@ Extracted from dev_route.py to enforce Single Responsibility Principle.
 import os
 import re
 from datetime import datetime
+from pathlib import Path
 from typing import Dict, Optional
 
 from src.paths import VAULT_ROOT, HANDOFFS_DIR
+from src.governance_unit_of_work import GovernanceUnitOfWork
 
 
 class HandoffWriter:
@@ -172,21 +174,13 @@ class HandoffWriter:
             f'tasks_completed: 0\ntasks_total: {tasks_count}'
         )
 
-        # ----------------------------------------------------------------
-        # Save to vault handoffs folder
-        # ----------------------------------------------------------------
-        os.makedirs(self.vault_handoffs_dir, exist_ok=True)
+        # Use GovernanceUnitOfWork for atomic multi-file writes (vault + source handoff)
         vault_path = os.path.join(self.vault_handoffs_dir, filename)
-        with open(vault_path, "w", encoding="utf-8") as f:
-            f.write(content)
-
-        # ----------------------------------------------------------------
-        # Save backup to source project handoffs folder
-        # ----------------------------------------------------------------
-        os.makedirs(self.source_handoffs_dir, exist_ok=True)
         source_path = os.path.join(self.source_handoffs_dir, filename)
-        with open(source_path, "w", encoding="utf-8") as f:
-            f.write(content)
+
+        with GovernanceUnitOfWork() as uow:
+            uow.stage_file(Path(vault_path), content)
+            uow.stage_file(Path(source_path), content)
 
         print(f"[HANDOFF] Beta handoff saved → vault: {vault_path}")
         print(f"[HANDOFF] Beta handoff saved → source: {source_path}")
@@ -194,6 +188,7 @@ class HandoffWriter:
         # ----------------------------------------------------------------
         # Append a Beta Testing section to the proposal file with a link
         # (proposal_file already resolved above in the pre-lookup block)
+        # OUTSIDE UoW per A4 design (single-file append operation)
         # ----------------------------------------------------------------
 
         if proposal_file and os.path.exists(proposal_file):
@@ -372,27 +367,20 @@ class HandoffWriter:
             f'tasks_completed: 0\ntasks_total: {tasks_count}'
         )
 
-        # ----------------------------------------------------------------
-        # Save to vault handoffs folder
-        # ----------------------------------------------------------------
-        os.makedirs(self.vault_handoffs_dir, exist_ok=True)
+        # Use GovernanceUnitOfWork for atomic multi-file writes (vault + source handoff)
         vault_path = os.path.join(self.vault_handoffs_dir, filename)
-        with open(vault_path, "w", encoding="utf-8") as f:
-            f.write(content)
-
-        # ----------------------------------------------------------------
-        # Save backup to source project handoffs folder
-        # ----------------------------------------------------------------
-        os.makedirs(self.source_handoffs_dir, exist_ok=True)
         source_path = os.path.join(self.source_handoffs_dir, filename)
-        with open(source_path, "w", encoding="utf-8") as f:
-            f.write(content)
+
+        with GovernanceUnitOfWork() as uow:
+            uow.stage_file(Path(vault_path), content)
+            uow.stage_file(Path(source_path), content)
 
         print(f"[HANDOFF] Alpha handoff saved → vault: {vault_path}")
         print(f"[HANDOFF] Alpha handoff saved → source: {source_path}")
 
         # ----------------------------------------------------------------
         # Append an Alpha Polish section to the proposal file with a link
+        # OUTSIDE UoW per A4 design (single-file append operation)
         # ----------------------------------------------------------------
 
         if proposal_file and os.path.exists(proposal_file):
