@@ -2091,11 +2091,19 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         }
 
-        // Load board data from API
+        // Load board data from API.
+        //
+        // We only paint the "Loading..." placeholder on first paint (when the
+        // board is empty). On auto-refresh ticks the previous render stays
+        // visible until the new HTML replaces it in renderBoard(), eliminating
+        // the every-30s flicker reported during smoke-test.
         async function loadBoard() {
             hideError();
             const board = document.getElementById('kanban-board');
-            if (board) board.innerHTML = '<p class="placeholder kanban-placeholder">Loading Kanban board...</p>';
+            const isFirstPaint = board && !board.querySelector('.kanban-column');
+            if (isFirstPaint) {
+                board.innerHTML = '<p class="placeholder kanban-placeholder">Loading Kanban board...</p>';
+            }
 
             try {
                 const response = await fetch(`${API_BASE}/api/kanban/board`);
@@ -2110,8 +2118,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 renderBoard(cardsByColumn);
             } catch (err) {
                 showError(`Failed to load Kanban board: ${err.message}`);
-                const board = document.getElementById('kanban-board');
-                if (board) board.innerHTML = '<p class="placeholder kanban-placeholder">Error loading board. Check console for details.</p>';
+                // Only swap the board to an error placeholder if it's empty.
+                // If we already had cards, keep them visible behind the banner.
+                if (board && !board.querySelector('.kanban-column')) {
+                    board.innerHTML = '<p class="placeholder kanban-placeholder">Error loading board. Check console for details.</p>';
+                }
             }
         }
 
