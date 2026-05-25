@@ -849,13 +849,17 @@ def chat_with_role(request: RoleChatRequest):
         
         # Send to LLM using the orchestrator's LLM client
         from src.llm_client import LLMClient
-        llm_client = LLMClient(config)
+        llm_client = LLMClient()
         
-        response_text = llm_client.send_request(
-            role=request.role,
+        # Get model from role config or use default
+        model = role_config.get('model', 'local-model')
+        
+        response_text = llm_client.generate_response(
             prompt=full_prompt,
             system_prompt=role_config.get('system_prompt', ''),
-            temperature=role_config.get('temperature', 0.7)
+            model=model,
+            temperature=role_config.get('temperature', 0.7),
+            max_tokens=role_config.get('max_tokens', 2048)
         )
         
         # Update history
