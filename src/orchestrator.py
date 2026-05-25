@@ -764,7 +764,7 @@ Output your final blueprint in the specified JSON format for your role.""",
         #       document is generated for the developer to work from in VS Code.
         #       Card stays in Beta Testing (🔍 Review) until the human is done.
         # ------------------------------------------------------------------
-        if next_phase == "beta":
+        if next_phase == "beta_testing":
             user_input = (
                 f"Review the following development proposal thoroughly.\n\n"
                 f"Your output MUST contain four clearly-headed sections:\n"

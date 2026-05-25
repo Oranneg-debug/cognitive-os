@@ -83,7 +83,9 @@ def _load_status_mapping_config() -> dict:
             "status_map": {
                 "backlog": {"phase_key": "proposal", "status": "pending_approval", "order": 0},
                 "proposal": {"phase_key": "proposal", "status": "in_review", "order": 1},
-                "beta testing": {"phase_key": "beta", "status": "testing_in_progress", "order": 2},
+                # phase_key MUST match a WorkflowPhase enum value
+                # (src/workflow_models.py). "beta_testing" not "beta".
+                "beta testing": {"phase_key": "beta_testing", "status": "testing_in_progress", "order": 2},
                 "alpha polish": {"phase_key": "alpha", "status": "ready_for_review", "order": 3},
                 "finalized": {"phase_key": "finalized", "status": "released", "order": 4},
                 "deployed": {"phase_key": "deployed", "status": "live", "order": 5}
@@ -126,10 +128,13 @@ class KanbanProcessor:
         
         # Column order (matches lifecycle phases) - note: phase_key used instead of phase
         # to avoid triggering single-phase-writer gate on configuration data
+        # phase_key values MUST match WorkflowPhase enum literals in
+        # src/workflow_models.py (otherwise WorkflowPhase(phase_key) raises
+        # ValueError and the transition is blocked at argument construction).
         self.columns = {
             "backlog": {"phase_key": "proposal", "order": 0, "next": "proposal"},
-            "proposal": {"phase_key": "proposal", "order": 1, "next": "beta"},
-            "beta testing": {"phase_key": "beta", "order": 2, "next": "alpha"},
+            "proposal": {"phase_key": "proposal", "order": 1, "next": "beta_testing"},
+            "beta testing": {"phase_key": "beta_testing", "order": 2, "next": "alpha"},
             "alpha polish": {"phase_key": "alpha", "order": 3, "next": "finalized"},
             "finalized": {"phase_key": "finalized", "order": 4, "next": "deployed"},
             "deployed": {"phase_key": "deployed", "order": 5, "next": None}
@@ -495,11 +500,13 @@ class KanbanProcessor:
         Returns:
             dict: {'status': 'pending', 'phase': <normalised column name>}
         """
-        # Canonical phase names (normalised, lowercase, no spaces)
+        # Canonical phase names — MUST match WorkflowPhase enum literals
+        # (src/workflow_models.py). The column-display label differs from
+        # the enum value for "beta testing" -> "beta_testing".
         phase_map = {
             "backlog":       "backlog",
             "proposal":      "proposal",
-            "beta testing":  "beta",
+            "beta testing":  "beta_testing",
             "alpha polish":  "alpha",
             "finalized":     "finalized",
             "deployed":      "deployed",
@@ -1021,7 +1028,7 @@ IMPORTANT INSTRUCTIONS:
             # Beta and Alpha: council ran but the human still has work to do.
             # Keep the card in 🔍 Review so they know to open the handoff / polish plan.
             # Finalized / Deployed: fully automated — mark as ✅ Processed.
-            if next_phase in ("beta", "alpha"):
+            if next_phase in ("beta_testing", "alpha"):
                 post_status = "review"
             else:
                 post_status = "processed"
@@ -1101,7 +1108,7 @@ IMPORTANT INSTRUCTIONS:
         if "Alpha Polish In Progress" in content:
             return "alpha"
         if "Beta Testing In Progress" in content:
-            return "beta"
+            return "beta_testing"
         
         return "proposal"
     
