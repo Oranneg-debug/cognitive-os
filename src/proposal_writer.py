@@ -330,17 +330,35 @@ class ProposalWriter:
             kanban_store = KanbanStore()
             
             # Run the async add_card method from sync context
-            asyncio.run(kanban_store.add_card(
-                proposal_id=proposal_id,
-                prefix=prefix,
-                column_name="Backlog",
-                title=title or None,
-                substatus=None,
-                severity="BACKLOG",
-                origin=origin or "unknown",
-                approver="system",
-                reason="Proposal created"
-            ))
+            # Handle case where event loop might already be running
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                # No event loop running, use asyncio.run()
+                asyncio.run(kanban_store.add_card(
+                    proposal_id=proposal_id,
+                    prefix=prefix,
+                    column_name="Backlog",
+                    title=title or None,
+                    substatus=None,
+                    severity="BACKLOG",
+                    origin=origin or "unknown",
+                    approver="system",
+                    reason="Proposal created"
+                ))
+            else:
+                # Event loop exists, create task
+                asyncio.create_task(kanban_store.add_card(
+                    proposal_id=proposal_id,
+                    prefix=prefix,
+                    column_name="Backlog",
+                    title=title or None,
+                    substatus=None,
+                    severity="BACKLOG",
+                    origin=origin or "unknown",
+                    approver="system",
+                    reason="Proposal created"
+                ))
             
             print(f"✅ Added {proposal_id} to dashboard kanban store")
             return True
