@@ -49,7 +49,7 @@
                     <button class="tab-link" data-tab="lmstudio">LM Studio</button>
                     <button class="tab-link" data-tab="system">System</button>
                 </div>
-                <div class="config-actions" style="display: none;">
+                <div class="config-actions is-hidden">
                     <button id="save-btn" class="save-btn" disabled>Save Configuration</button>
                     <button id="save-preset-btn" class="preset-btn" title="Save current config as preset">Save Preset</button>
                     <button id="load-preset-btn-config" class="preset-btn" title="Load saved preset">Load Preset</button>
@@ -500,7 +500,16 @@
                     </section>
                     
                     <section id="system-kanban" class="system-subtab">
-                        <div class="placeholder">Loading Kanban Workflow...</div>
+                        <!-- Inline Error Banner -->
+                        <div id="kanban-error-banner" class="error-banner is-hidden" role="alert">
+                            <span id="error-message"></span>
+                            <button id="close-error-btn" class="error-close" aria-label="Close error">&times;</button>
+                        </div>
+
+                        <!-- Kanban Board -->
+                        <div id="kanban-board" class="kanban-board">
+                            <!-- Columns will be injected here -->
+                        </div>
                     </section>
                 </div>
             </div>

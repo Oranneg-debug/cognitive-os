@@ -53,7 +53,14 @@ When a user references this handoff (e.g. *"work on ARCH-20260522-205800-DA5B0A2
    - **Constraints:** M1, M4, H8
    - **Files:** `src/api.py`
 
-- [ ] **[✏️ PLANNER] A4. Develop dashboard Kanban UI with vanilla JS drag-drop and gate-fail modal**
+- [x] **[✏️ PLANNER] A4. Develop dashboard Kanban UI with vanilla JS drag-drop and gate-fail modal**
+   - [x] Implemented by Cline through 3 review rounds (handoff: `dev/handoffs/ARCH-DA5B0A2D-A4-CLINE-HANDOFF.md`)
+   - [x] 6 columns in canonical order, prefix badges, severity dot, drag-drop, inline error banner
+   - [x] Substatus dropdown on beta-testing cards (planning / execution.coding / execution.testing / review / blocked)
+   - [x] History drawer fetching `/api/workflow/state/{id}`, Esc-close
+   - [x] Auto-refresh wired to subtab activation
+   - [x] Vanilla JS, no new deps, no inline styles, IIFE-scoped
+   - [ ] Live browser smoke-test deferred (Windows port-5000 ghost listener after restart — manual reboot needed; functional correctness validated via static review)
    - [ ] HTML5 drag events
    - [ ] Timeout/snap-back logic
    - **Acceptance:** Dashboard Kanban tab functions correctly without React/Vue/Svelte

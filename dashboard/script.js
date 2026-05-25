@@ -1814,4 +1814,404 @@ document.addEventListener('DOMContentLoaded', () => {
         // Initialize home tab since it's the default active tab
         initializeHome();
     });
-});
+
+    // ===== KANBAN WORKFLOW MODULE =====
+    window.Kanban = (function() {
+        const API_BASE = '';
+        const CANONICAL_COLUMNS = ['backlog', 'proposal', 'beta testing', 'alpha polish', 'finalized', 'deployed'];
+        const VALID_SUBSTATUSES = ['planning', 'execution.coding', 'execution.testing', 'review', 'blocked'];
+
+        // Error banner helpers
+        const errorBanner = document.getElementById('kanban-error-banner');
+        const errorMessage = document.getElementById('error-message');
+        const closeErrorBtn = document.getElementById('close-error-btn');
+
+        function showError(detail) {
+            if (!errorBanner || !errorMessage) return;
+            errorMessage.textContent = detail || 'An unknown error occurred';
+            errorBanner.classList.remove('is-hidden');
+        }
+
+        function hideError() {
+            if (!errorBanner) return;
+            errorBanner.classList.add('is-hidden');
+        }
+
+        // Auto-refresh state (defined once, inside IIFE)
+        let refreshInterval = null;
+
+        function startAutoRefresh() {
+            if (refreshInterval) return;
+            refreshInterval = setInterval(() => {
+                if (document.visibilityState === 'visible') {
+                    loadBoard();
+                }
+            }, 30000); // 30 seconds
+        }
+
+        function stopAutoRefresh() {
+            if (refreshInterval) {
+                clearInterval(refreshInterval);
+                refreshInterval = null;
+            }
+        }
+
+        // Wire subtab activation/deactivation for auto-refresh
+        document.addEventListener('click', (e) => {
+            const link = e.target.closest('.system-subtab-link');
+            if (!link) return;
+            if (link.dataset.subtab === 'kanban') {
+                loadBoard();
+                startAutoRefresh();
+            } else {
+                stopAutoRefresh();
+            }
+        });
+
+        // Card creation
+        function createCard(cardData) {
+            const card = document.createElement('div');
+            card.className = 'kanban-card';
+            card.draggable = true;
+            card.dataset.proposalId = cardData.proposal_id;
+
+            // Prefix badge
+            let prefixClass = 'dev';
+            if (cardData.proposal_id.startsWith('ARCH-')) prefixClass = 'arch';
+            else if (cardData.proposal_id.startsWith('NLST-')) prefixClass = 'nlst';
+
+            const severityClass = cardData.severity || 'unknown';
+
+            // Substatus dropdown (only for beta testing cards)
+            let substatusHtml = '';
+            if (cardData.column_name === 'beta testing') {
+                const currentSubstatus = cardData.substatus || 'planning';
+                substatusHtml = `
+                    <div class="kanban-card-substatus">
+                        <label>Substatus</label>
+                        <select class="beta-substatus" data-proposal-id="${cardData.proposal_id}" data-prev-value="${currentSubstatus}">
+                            ${VALID_SUBSTATUSES.map(s => `<option value="${s}" ${currentSubstatus === s ? 'selected' : ''}>${formatSubstatus(s)}</option>`).join('')}
+                        </select>
+                    </div>
+                `;
+            }
+
+            card.innerHTML = `
+                <div class="kanban-card-header">
+                    <span class="kanban-card-prefix ${prefixClass}">${prefixClass.toUpperCase()}</span>
+                    <span class="kanban-card-title">${escapeHtml(cardData.title)}</span>
+                </div>
+                <div class="kanban-card-meta">
+                    <span class="kanban-card-severity ${severityClass}">
+                        <span class="kanban-card-severity-dot"></span>
+                        <span>${severityClass.toUpperCase()}</span>
+                    </span>
+                </div>
+                ${substatusHtml}
+            `;
+
+            // Drag events
+            card.addEventListener('dragstart', handleDragStart);
+            card.addEventListener('dragend', handleDragEnd);
+
+            // Click to show history
+            card.addEventListener('click', (e) => {
+                if (!e.target.classList.contains('beta-substatus')) {
+                    showHistory(cardData.proposal_id);
+                }
+            });
+
+            return card;
+        }
+
+        function formatSubstatus(s) {
+            const map = {
+                'planning': 'Planning',
+                'execution.coding': 'Coding',
+                'execution.testing': 'Testing',
+                'review': 'Review',
+                'blocked': 'Blocked'
+            };
+            return map[s] || s;
+        }
+
+        // Global drag state
+        let draggedCard = null;
+        let sourceColumn = null;
+
+        function handleDragStart(e) {
+            draggedCard = this;
+            sourceColumn = this.closest('.kanban-column');
+            this.classList.add('dragging');
+            e.dataTransfer.effectAllowed = 'move';
+            e.dataTransfer.setData('text/plain', this.dataset.proposalId);
+        }
+
+        function handleDragEnd(e) {
+            this.classList.remove('dragging');
+            draggedCard = null;
+            sourceColumn = null;
+            
+            // Remove drag-over class from all columns
+            document.querySelectorAll('.kanban-column').forEach(col => {
+                col.classList.remove('drag-over');
+            });
+        }
+
+        // Column drop handling
+        function setupDropZone(column) {
+            column.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+                column.classList.add('drag-over');
+            });
+
+            column.addEventListener('dragleave', (e) => {
+                if (!column.contains(e.relatedTarget)) {
+                    column.classList.remove('drag-over');
+                }
+            });
+
+            column.addEventListener('drop', async (e) => {
+                e.preventDefault();
+                column.classList.remove('drag-over');
+                
+                if (!draggedCard) return;
+                
+                const proposalId = draggedCard.dataset.proposalId;
+                const newColumnId = column.dataset.columnId;
+                const oldColumnId = sourceColumn.dataset.columnId;
+
+                // Don't allow same-column drops
+                if (oldColumnId === newColumnId) {
+                    hideError();
+                    return;
+                }
+
+                draggedCard.classList.add('is-loading');
+
+                try {
+                    const response = await fetch(`${API_BASE}/api/workflow/transition`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            proposal_id: proposalId,
+                            target_column: newColumnId
+                        })
+                    });
+
+                    if (response.ok) {
+                        hideError();
+                        // Reload board on success
+                        loadBoard();
+                    } else {
+                        // Handle errors
+                        const errorData = await response.json().catch(() => ({}));
+                        const detail = errorData.detail || `HTTP ${response.status}`;
+                        
+                        if (response.status === 404) {
+                            showError(`Proposal ${proposalId} not found. Reloading board...`);
+                            setTimeout(loadBoard, 2000);
+                        } else {
+                            showError(detail);
+                            // Snap card back to original position
+                            draggedCard.classList.remove('is-loading');
+                        }
+                    }
+                } catch (err) {
+                    showError(`Network error: ${err.message}`);
+                    draggedCard.classList.remove('is-loading');
+                }
+            });
+        }
+
+        // Render board columns
+        function renderBoard(cardsByColumn) {
+            const board = document.getElementById('kanban-board');
+            if (!board) return;
+
+            let html = '';
+            CANONICAL_COLUMNS.forEach(columnId => {
+                const columnCards = cardsByColumn[columnId] || [];
+                html += `
+                    <div class="kanban-column" data-column-id="${columnId}">
+                        <div class="kanban-column-header">
+                            <h3>${escapeHtml(columnId)}</h3>
+                            <span class="kanban-column-count">${columnCards.length}</span>
+                        </div>
+                        <div class="kanban-column-body">
+                            ${columnCards.map(card => createCard(card).outerHTML).join('')}
+                        </div>
+                    </div>
+                `;
+            });
+
+            board.innerHTML = html;
+
+            // Attach drop zones
+            document.querySelectorAll('.kanban-column').forEach(column => {
+                setupDropZone(column);
+            });
+
+            // Attach substatus change handlers
+            document.querySelectorAll('.beta-substatus').forEach(select => {
+                select.addEventListener('change', handleSubstatusChange);
+            });
+        }
+
+        // Load board data from API
+        async function loadBoard() {
+            hideError();
+            const board = document.getElementById('kanban-board');
+            if (board) board.innerHTML = '<p class="placeholder kanban-placeholder">Loading Kanban board...</p>';
+
+            try {
+                const response = await fetch(`${API_BASE}/api/kanban/board`);
+                
+                if (!response.ok) {
+                    throw new Error(`API error: ${response.status}`);
+                }
+
+                const data = await response.json();
+                // data has {columns: [{name, cards}, ...], generated_at} format
+                const cardsByColumn = Object.fromEntries((data.columns || []).map(c => [c.name, c.cards || []]));
+                renderBoard(cardsByColumn);
+            } catch (err) {
+                showError(`Failed to load Kanban board: ${err.message}`);
+                const board = document.getElementById('kanban-board');
+                if (board) board.innerHTML = '<p class="placeholder kanban-placeholder">Error loading board. Check console for details.</p>';
+            }
+        }
+
+        // Substatus change handler
+        async function handleSubstatusChange(e) {
+            const select = e.target;
+            const proposalId = select.dataset.proposalId;
+            const newSubstatus = select.value;
+
+            try {
+                const response = await fetch(`${API_BASE}/api/workflow/transition`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        proposal_id: proposalId,
+                        target_column: 'beta testing',
+                        target_substatus: newSubstatus,
+                        gate_passed: 1
+                    })
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json().catch(() => ({}));
+                    showError(errorData.detail || `Failed to update substatus`);
+                    select.value = select.dataset.prevValue;
+                } else {
+                    hideError();
+                }
+            } catch (err) {
+                showError(`Network error: ${err.message}`);
+                select.value = select.dataset.prevValue;
+            }
+        }
+
+        // History drawer
+        const historyOverlay = document.createElement('div');
+        historyOverlay.id = 'kanban-history-overlay';
+        historyOverlay.innerHTML = `
+            <div id="kanban-history-panel">
+                <div id="kanban-history-header">
+                    <h3>Transition History</h3>
+                    <button id="kanban-history-close">&times;</button>
+                </div>
+                <div id="kanban-history-body"></div>
+            </div>
+        `;
+        document.body.appendChild(historyOverlay);
+
+        function showHistory(proposalId) {
+            const body = document.getElementById('kanban-history-body');
+            if (!body) return;
+
+            body.innerHTML = '<p class="placeholder">Loading history...</p>';
+            
+            fetch(`${API_BASE}/api/workflow/state/${encodeURIComponent(proposalId)}?history_limit=10`)
+                .then(r => r.ok ? r.json() : Promise.reject(r))
+                .then(data => {
+                    if (!body) return;
+                    
+                    const transitions = data.history || [];
+                    if (transitions.length === 0) {
+                        body.innerHTML = '<p class="placeholder">No transition history found.</p>';
+                    } else {
+                            body.innerHTML = transitions.map((t, i) => {
+                                const approver = t.approver || 'system';
+                                const reason = t.reason ? ` (${escapeHtml(t.reason)})` : '';
+                                const gatePassed = t.gate_passed !== undefined ? ` [gate:${t.gate_passed}]` : '';
+                                return `
+                                    <div class="kanban-transition-item">
+                                        <span class="label">${escapeHtml(t.from_column || 'N/A')}</span>
+                                        <span class="arrow">→</span>
+                                        <span class="value">${escapeHtml(t.to_column)}</span>
+                                        <span class="timestamp">${escapeHtml(new Date(t.ts || 0).toLocaleString())}</span>
+                                        <span class="note">${approver}${reason}${gatePassed}</span>
+                                    </div>
+                                `;
+                            }).join('');
+                    }
+                })
+                .catch(err => {
+                    if (!body) return;
+                    body.innerHTML = `<p class="placeholder">Failed to load history: ${err.message || 'Unknown error'}</p>`;
+                });
+            
+            historyOverlay.classList.add('active');
+        }
+
+        function hideHistory() {
+            historyOverlay.classList.remove('active');
+        }
+
+        // Close history drawer when clicking close button
+        document.getElementById('kanban-history-close').addEventListener('click', hideHistory);
+
+        // Close on Esc key
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && historyOverlay.classList.contains('active')) {
+                hideHistory();
+            }
+        });
+
+        // Close on overlay click
+        historyOverlay.addEventListener('click', (e) => {
+            if (e.target === historyOverlay) {
+                hideHistory();
+            }
+        });
+
+        // Close error banner button
+        if (closeErrorBtn) {
+            closeErrorBtn.addEventListener('click', hideError);
+        }
+
+        // Expose public API
+        return {
+            loadBoard,
+            showError,
+            hideError,
+            init: function() {
+                // Initial load: render once so the board is populated when the
+                // user first opens the Kanban subtab. Auto-refresh stays OFF
+                // until the user actually navigates to the Kanban subtab
+                // (wired via the document click handler above). This avoids a
+                // background timer firing while the user is on Models / Bench /
+                // any other tab on first load.
+                loadBoard();
+            },
+            startAutoRefresh,
+            stopAutoRefresh
+        };
+    })();
+
+    // Initialize Kanban module - MUST be inside DOMContentLoaded since IIFE is inside it
+    Kanban.init();
+});  // End of DOMContentLoaded

@@ -66,3 +66,9 @@ scripts/.boardroom_*
 # Handoff backups produced by scripts/replan_existing_handoffs.py --apply
 dev/handoffs/*.bak.*.md
 
+
+# ARCH-DA5B0A2D — kanban_state.sqlite is the runtime SQLite store.
+# It's recreated by Orchestrator.boot() on first server start; backups
+# live under dev/.backups/ (already gitignored by the env/venv rules above).
+dev/kanban_state.sqlite
+
