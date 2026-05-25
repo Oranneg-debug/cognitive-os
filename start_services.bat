@@ -21,7 +21,7 @@ start /B "" cmd /c "timeout /t 10 /nobreak >nul && echo Loading embedder on CPU.
 :: Without this, re-running start_services.bat hits [Errno 10048] because
 :: the previous server is still bound.
 for /f "tokens=5" %%P in ('netstat -ano ^| findstr ":5000.*LISTENING"') do (
-    echo Killing existing server on port 5000 (PID %%P)...
+    echo Killing existing server on port 5000, PID %%P...
     taskkill /F /PID %%P >nul 2>&1
 )
 
