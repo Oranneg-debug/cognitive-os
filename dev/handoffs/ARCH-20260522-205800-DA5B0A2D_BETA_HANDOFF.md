@@ -32,7 +32,7 @@ When a user references this handoff (e.g. *"work on ARCH-20260522-205800-DA5B0A2
 2. **Work through the tasks** in `## 🔧 Implementation Tasks` below, ticking each `- [ ]` to `- [x]` as completed
 ### Section A — Core
 
-- [ ] **[✏️ PLANNER] A1. Create src/kanban_store.py with SQLite schema and CRUD operations**
+- [x] **[✏️ PLANNER] A1. Create src/kanban_store.py with SQLite schema and CRUD operations**
    - [ ] Define tables: cards, transitions
    - [ ] Implement async-safe CRUD functions
    - **Acceptance:** SQLite database is the single source of truth for Kanban state
