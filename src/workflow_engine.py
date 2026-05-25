@@ -39,11 +39,15 @@ from src.git_operations import (
 )
 from src.handoff_vault import HandoffVault
 from src.approval_logger import ApprovalLogger
+from src.paths import PROPOSALS_DIR as _DEFAULT_PROPOSALS_DIR
 
 
 # Configuration
-PROPOSALS_DIR = Path("dev/proposals")
-STATE_MACHINE_PATH = Path("config/state_machine.yaml")
+# Default to the canonical absolute path from src.paths so the engine
+# resolves the same files regardless of process cwd. Tests can override
+# via the ``proposals_dir`` constructor arg.
+PROPOSALS_DIR = _DEFAULT_PROPOSALS_DIR
+STATE_MACHINE_PATH = Path(__file__).resolve().parent.parent / "config" / "state_machine.yaml"
 
 
 class WorkflowEngine:
@@ -128,8 +132,10 @@ class WorkflowEngine:
             TransitionConflictError: If version_hash mismatch (409)
             GateError: If gate check fails
         """
-        proposal_path = self.proposals_dir / f"{req.proposal_id}.md"
-        
+        # Canonical filename is ``<proposal_id>_PROPOSAL.md`` (set by
+        # ProposalWriter.create_proposal and respected by every consumer).
+        proposal_path = self.proposals_dir / f"{req.proposal_id}_PROPOSAL.md"
+
         if not proposal_path.exists():
             return WorkflowTransitionResult(
                 success=False,
