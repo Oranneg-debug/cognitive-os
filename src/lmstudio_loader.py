@@ -811,13 +811,13 @@ def _cli_list(loader: LMStudioLoader) -> int:
     print()
     print("== loaded ==")
     for inst in loader.list_loaded():
-        print(f"  {inst.identifier:<40} ← {inst.model_key}")
+        print(f"  {inst.identifier:<40} <- {inst.model_key}")
     return 0
 
 
 def _cli_ensure(loader: LMStudioLoader, model_key: str) -> int:
     def progress(fraction: float) -> None:
-        bar = "█" * int(fraction * 20)
+        bar = "=" * int(fraction * 20)
         pad = " " * (20 - len(bar))
         print(f"\r  [{bar}{pad}] {fraction * 100:5.1f}%", end="", flush=True)
 
