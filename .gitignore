@@ -58,3 +58,7 @@ dev/reports/
 
 # Quarantine for reviewer-rejected work (kept locally, never committed)
 dev/.cline_rejected_phase5/
+
+# Boardroom scratch artefacts (verdict captures from /process responses)
+scripts/.boardroom_*
+
