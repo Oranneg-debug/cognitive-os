@@ -4,6 +4,7 @@ Handoff Writer Module - Handles handoff document generation.
 Extracted from dev_route.py to enforce Single Responsibility Principle.
 """
 
+import logging
 import os
 import re
 from datetime import datetime
@@ -13,6 +14,117 @@ from typing import Dict, Optional
 from src.paths import VAULT_ROOT, HANDOFFS_DIR
 from src.governance_unit_of_work import GovernanceUnitOfWork
 from src.integration_flags import is_governance_uow_enabled
+
+logger = logging.getLogger(__name__)
+
+
+# ════════════════════════════════════════════════════════════════════
+#  ARCH-5DFB393F (A5+A6) — planner integration with explicit fallback
+# ════════════════════════════════════════════════════════════════════
+
+#: Exact fallback notice text. Pinned per Specialist amendment A4 from
+#: the 2026-05-25 boardroom verdict on ARCH-5DFB393F. Integration tests
+#: assert that this exact prefix appears at the top of a fallen-back
+#: tasks block; do not edit casually.
+_PLANNER_FALLBACK_NOTICE_TEMPLATE: str = (
+    "> ⚠️ PLANNER FAILED, FALLBACK ACTIVE: {reason}. "
+    "Tasks extracted via legacy regex.\n\n"
+)
+
+
+def _planner_enabled() -> bool:
+    """Read ``handoff.planner_enabled`` from master_config.
+
+    Returns ``True`` (the default) on any error so that the planner is
+    on by default; the flag is intended as a kill-switch, not an opt-in.
+    """
+    try:
+        from src.orchestrator import get_config
+        return bool(get_config().get("handoff", {}).get("planner_enabled", True))
+    except Exception as exc:
+        logger.warning("handoff.planner_enabled read failed (%r); defaulting to True.", exc)
+        return True
+
+
+def _render_tasks_via_planner(
+    proposal_id: str,
+    council_report: str,
+    proposal_file: Optional[str],
+    binding_constraints: Optional[list] = None,
+) -> Optional[str]:
+    """Try the HandoffPlanner; return rendered tasks markdown on success.
+
+    Returns ``None`` on any failure so the caller can fall back to the
+    legacy regex extractor (CSTR-PLANNER-V2). Never raises.
+    """
+    if not _planner_enabled():
+        return None
+
+    try:
+        from src.handoff_planner import HandoffPlanner, PlannerError
+    except Exception as exc:
+        logger.warning("HandoffPlanner import failed (%r); falling back.", exc)
+        return None
+
+    proposal_body = ""
+    if proposal_file and os.path.exists(proposal_file):
+        try:
+            with open(proposal_file, "r", encoding="utf-8") as _f:
+                proposal_body = _f.read()
+        except OSError as exc:
+            logger.warning("Could not read proposal %s (%r); planner will see empty body.", proposal_file, exc)
+
+    try:
+        plan = HandoffPlanner().plan(
+            proposal_id=proposal_id,
+            proposal_body=proposal_body,
+            council_report=council_report,
+            binding_constraints=binding_constraints or [],
+        )
+    except PlannerError as exc:
+        logger.warning("HandoffPlanner failed (%s: %s); falling back to legacy extractor.",
+                       type(exc).__name__, exc)
+        return None
+    except Exception as exc:  # noqa: BLE001 — true catch-all per CSTR-PLANNER-V2
+        logger.warning("HandoffPlanner raised unexpected %s (%s); falling back.",
+                       type(exc).__name__, exc)
+        return None
+
+    return plan.to_markdown()
+
+
+def _build_tasks_block_with_fallback(
+    proposal_id: str,
+    council_report: str,
+    proposal_file: Optional[str],
+    legacy_tasks_block_factory,
+    binding_constraints: Optional[list] = None,
+) -> str:
+    """Compose the final tasks block.
+
+    On planner success: returns the planner-rendered markdown verbatim.
+    On planner failure: returns the fallback notice prepended to the
+    legacy block produced by ``legacy_tasks_block_factory()`` (a zero-arg
+    callable so we never compute the legacy block when the planner
+    succeeds).
+    """
+    rendered = _render_tasks_via_planner(
+        proposal_id=proposal_id,
+        council_report=council_report,
+        proposal_file=proposal_file,
+        binding_constraints=binding_constraints,
+    )
+    if rendered is not None:
+        return rendered
+
+    legacy = legacy_tasks_block_factory()
+    if not _planner_enabled():
+        # Flag explicitly off — no warning notice, this is the desired path.
+        return legacy
+
+    # Planner was tried and failed → caller needs the visible notice.
+    reason = "planner unavailable or output rejected (see logs)"
+    return _PLANNER_FALLBACK_NOTICE_TEMPLATE.format(reason=reason) + legacy
 
 
 class HandoffWriter:
@@ -103,29 +215,10 @@ class HandoffWriter:
             or "_No specific difficulties extracted — see full report below._"
         )
 
-        # Build a checklist from any bullet/numbered lines in an
-        # "implementation" or "tasks" section.
-        tasks_raw = _extract_section(
-            council_report,
-            "Implementation Tasks", "Tasks", "Implementation Plan",
-            "Action Items", "Next Steps"
-        )
-        if tasks_raw:
-            task_lines = []
-            for line in tasks_raw.splitlines():
-                stripped = line.strip()
-                if stripped and not stripped.startswith("#"):
-                    # Normalise any existing bullet/number to a checkbox
-                    stripped = re.sub(r'^[-*•\d+\.]+\s*', '', stripped)
-                    if stripped:
-                        task_lines.append(f"- [ ] {stripped}")
-            tasks_block = "\n".join(task_lines) if task_lines else "- [ ] See full council report for tasks"
-        else:
-            tasks_block = "- [ ] See full council report below for implementation guidance"
-
         # ----------------------------------------------------------------
         # Pre-lookup: kanban_card_id and source_note from proposal file
-        # (reused below in the Beta Testing section append)
+        # (reused below in the Beta Testing section append AND passed to
+        # the planner so it can read the proposal body)
         # ----------------------------------------------------------------
         proposals_dir = proposals_dir or "dev/proposals"
         vault_proposals_dir = str(VAULT_ROOT / "1. P - Seedlings" / "dev" / "proposals")
@@ -145,12 +238,39 @@ class HandoffWriter:
         if proposal_file and os.path.exists(proposal_file):
             with open(proposal_file, "r", encoding="utf-8") as _pf:
                 _prop_text = _pf.read()
-            _card_m = re.search(r'\^\[DEV-[^\]]+\]', _prop_text)
+            _card_m = re.search(r'\^\[(?:DEV|ARCH|NLST)-[^\]]+\]', _prop_text)
             if _card_m:
                 kanban_card_id_val = _card_m.group(0)
             _src_m = re.search(r'source_note:\s*"?(\[\[[^\]]+\]\])"?', _prop_text)
             if _src_m:
                 source_note_val = _src_m.group(1)
+
+        # ARCH-5DFB393F (A5): planner-first, regex-fallback. The legacy
+        # extractor is the closure passed to _build_tasks_block_with_fallback
+        # so it only runs if the planner is disabled or fails.
+        def _legacy_beta_tasks() -> str:
+            tasks_raw = _extract_section(
+                council_report,
+                "Implementation Tasks", "Tasks", "Implementation Plan",
+                "Action Items", "Next Steps"
+            )
+            if tasks_raw:
+                task_lines = []
+                for line in tasks_raw.splitlines():
+                    stripped = line.strip()
+                    if stripped and not stripped.startswith("#"):
+                        stripped = re.sub(r'^[-*•\d+\.]+\s*', '', stripped)
+                        if stripped:
+                            task_lines.append(f"- [ ] {stripped}")
+                return "\n".join(task_lines) if task_lines else "- [ ] See full council report for tasks"
+            return "- [ ] See full council report below for implementation guidance"
+
+        tasks_block = _build_tasks_block_with_fallback(
+            proposal_id=proposal_id,
+            council_report=council_report,
+            proposal_file=proposal_file,
+            legacy_tasks_block_factory=_legacy_beta_tasks,
+        )
 
         tasks_count = sum(1 for ln in tasks_block.splitlines() if ln.strip().startswith("- [ ]"))
 
@@ -308,23 +428,6 @@ class HandoffWriter:
             or "_No explicit veto points extracted — see full report below._"
         )
 
-        tasks_raw = _extract_section(
-            council_report,
-            "Implementation Tasks", "Tasks", "Implementation Plan",
-            "Action Items", "Actionable Steps", "Next Steps", "Action Plan"
-        )
-        if tasks_raw:
-            task_lines = []
-            for line in tasks_raw.splitlines():
-                stripped = line.strip()
-                if stripped and not stripped.startswith("#"):
-                    stripped = re.sub(r'^[-*•\d+\.]+\s*', '', stripped)
-                    if stripped:
-                        task_lines.append(f"- [ ] {stripped}")
-            tasks_block = "\n".join(task_lines) if task_lines else "- [ ] See full council report for tasks"
-        else:
-            tasks_block = "- [ ] See full council report below for polish guidance"
-
         # ----------------------------------------------------------------
         # Pre-lookup: kanban_card_id and source_note from proposal file
         # ----------------------------------------------------------------
@@ -346,12 +449,37 @@ class HandoffWriter:
         if proposal_file and os.path.exists(proposal_file):
             with open(proposal_file, "r", encoding="utf-8") as _pf:
                 _prop_text = _pf.read()
-            _card_m = re.search(r'\^\[DEV-[^\]]+\]', _prop_text)
+            _card_m = re.search(r'\^\[(?:DEV|ARCH|NLST)-[^\]]+\]', _prop_text)
             if _card_m:
                 kanban_card_id_val = _card_m.group(0)
             _src_m = re.search(r'source_note:\s*"?(\[\[[^\]]+\]\])"?', _prop_text)
             if _src_m:
                 source_note_val = _src_m.group(1)
+
+        # ARCH-5DFB393F (A6): planner-first, regex-fallback. See A5 for rationale.
+        def _legacy_alpha_tasks() -> str:
+            tasks_raw = _extract_section(
+                council_report,
+                "Implementation Tasks", "Tasks", "Implementation Plan",
+                "Action Items", "Actionable Steps", "Next Steps", "Action Plan"
+            )
+            if tasks_raw:
+                task_lines = []
+                for line in tasks_raw.splitlines():
+                    stripped = line.strip()
+                    if stripped and not stripped.startswith("#"):
+                        stripped = re.sub(r'^[-*•\d+\.]+\s*', '', stripped)
+                        if stripped:
+                            task_lines.append(f"- [ ] {stripped}")
+                return "\n".join(task_lines) if task_lines else "- [ ] See full council report for tasks"
+            return "- [ ] See full council report below for polish guidance"
+
+        tasks_block = _build_tasks_block_with_fallback(
+            proposal_id=proposal_id,
+            council_report=council_report,
+            proposal_file=proposal_file,
+            legacy_tasks_block_factory=_legacy_alpha_tasks,
+        )
 
         tasks_count = sum(1 for ln in tasks_block.splitlines() if ln.strip().startswith("- [ ]"))
 
