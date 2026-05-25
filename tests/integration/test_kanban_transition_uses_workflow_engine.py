@@ -1,6 +1,23 @@
 """D2: KanbanProcessor transitions go through WorkflowEngine (Phase 5).
 
-Two scenarios:
+╔══════════════════════════════════════════════════════════════════════╗
+║  SKIPPED — superseded by ARCH-20260522-205800-DA5B0A2D                ║
+╠══════════════════════════════════════════════════════════════════════╣
+║  This test exercises the deprecated kanban_processor watcher path     ║
+║  (markdown drag → frontmatter mutation → WorkflowEngine transition).  ║
+║                                                                       ║
+║  Under DA5B0A2D the dashboard → /api/workflow/transition → SQLite     ║
+║  is the canonical path. Coverage for that path lives in:              ║
+║      tests/integration/test_kanban_api.py (16 cases)                  ║
+║      tests/test_kanban_store.py (23 cases)                            ║
+║                                                                       ║
+║  The watcher itself remains runnable (the kanban_processor module     ║
+║  is deprecated but not deleted), but its behaviour is no longer       ║
+║  part of the supported surface. Re-enable this test only if the       ║
+║  watcher is reactivated as a fallback.                                ║
+╚══════════════════════════════════════════════════════════════════════╝
+
+Two scenarios (preserved here as documentation, not as live tests):
 
 * `test_approved_transition_calls_workflow_engine`
     - workflow_engine.transition() returns success=True.
@@ -13,7 +30,7 @@ Two scenarios:
       and `reason` starts with "Transition vetoed:" (regression guard for the
       dead-letter overwrite bug fixed in cb3f5bb).
 
-Isolation strategy:
+Isolation strategy (unchanged in case we revive):
     - tmp_path is used as the simulated vault root.
     - `KanbanProcessor.cache_dir` and the post-construction `workflow_engine`
       attribute are redirected onto tmp_path.
@@ -27,6 +44,15 @@ Isolation strategy:
 """
 
 from __future__ import annotations
+
+import pytest
+
+pytestmark = pytest.mark.skip(
+    reason=(
+        "Deprecated by ARCH-DA5B0A2D — watcher path superseded by "
+        "kanban_store + dashboard API. See module docstring."
+    )
+)
 
 import json
 from pathlib import Path

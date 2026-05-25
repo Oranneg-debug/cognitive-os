@@ -60,7 +60,7 @@ When a user references this handoff (e.g. *"work on ARCH-20260522-205800-DA5B0A2
    - **Constraints:** H5
    - **Files:** `dashboard/index.html`, `dashboard/script.js`, `dashboard/styles.css`
 
-- [ ] **[✏️ PLANNER] A5. Slim src/kanban_processor.py to delegate only to kanban_store**
+- [x] **[✏️ PLANNER] A5. Slim src/kanban_processor.py to delegate only to kanban_store**
    - [ ] Remove polling and regex parsing
    - **Acceptance:** kanban_processor.py is a thin facade over kanban_store
    - **Files:** `src/kanban_processor.py`

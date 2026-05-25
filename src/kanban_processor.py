@@ -1,15 +1,62 @@
 """
-Kanban Processor Module - Automatic lifecycle phase transitions from Kanban board changes.
+Kanban Processor Module — Automatic lifecycle phase transitions.
 
-This script reads the Kanban Board file and automatically triggers dev_route phase updates
-when cards are moved between columns, making the development lifecycle fully visual.
+╔══════════════════════════════════════════════════════════════════════╗
+║  DEPRECATED — superseded by ARCH-20260522-205800-DA5B0A2D            ║
+╠══════════════════════════════════════════════════════════════════════╣
+║                                                                       ║
+║  This module's watcher loop and markdown-parse pipeline are           ║
+║  replaced by:                                                         ║
+║                                                                       ║
+║      ┌────────────────────────────────────────────────────────┐      ║
+║      │ src/kanban_store.py    — SQLite single source of truth │      ║
+║      │ src/kanban_renderer.py — atomic vault mirror generator │      ║
+║      │ src/api.py             — /api/kanban/* + /api/workflow │      ║
+║      │ dashboard/             — drag-drop editor (A4)         │      ║
+║      └────────────────────────────────────────────────────────┘      ║
+║                                                                       ║
+║  DO NOT add new features here. New transitions, new substatuses,     ║
+║  new approval flows — all of those go through ``kanban_store``       ║
+║  and the API. This file remains only as a compatibility shim for:    ║
+║                                                                       ║
+║    1. ``smoke_phase5.py`` — uses ``update_kanban_status`` to write    ║
+║       proposal frontmatter (still safe; doesn't touch the watcher).  ║
+║    2. The ``__main__`` block + ``watch_kanban_board`` — still         ║
+║       runnable but is being decommissioned. Don't restart the         ║
+║       watcher in production; use the dashboard instead.               ║
+║                                                                       ║
+║  The watcher's two recurring failure modes (version_hash mismatch    ║
+║  from same-process frontmatter mutation; markdown-parse races with    ║
+║  ``proposal_sync``) are STRUCTURALLY IMPOSSIBLE in the new           ║
+║  architecture. Migration of remaining state happens via               ║
+║  ``scripts/migrate_kanban_to_sqlite.py`` (B1).                       ║
+║                                                                       ║
+║  Removal targets v1.3.0 once the dashboard has been the sole         ║
+║  editor for ≥7 days with zero rollbacks.                              ║
+║                                                                       ║
+╚══════════════════════════════════════════════════════════════════════╝
 
-Enhancements:
+This module reads the Kanban Board file and automatically triggers dev_route phase
+updates when cards are moved between columns. Originally the central nervous system
+for lifecycle transitions; now a deprecated mirror of behaviour that lives in
+``kanban_store`` + ``api.py``.
+
+Enhancements (historical — kept for compat with ``smoke_phase5.py``):
 - Multi-format card parsing (^[id], [[link]], inline metadata)
 - Bidirectional sync (Kanban ↔ Proposal files)
 - Configurable status mapping
 - Transition validation (forward-only with exceptions)
 """
+
+import warnings as _warnings
+
+_warnings.warn(
+    "src.kanban_processor is deprecated by ARCH-DA5B0A2D; use "
+    "src.kanban_store + src.kanban_renderer + the dashboard API instead. "
+    "Removal targets v1.3.0.",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
 import os
 import json
