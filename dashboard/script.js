@@ -1909,9 +1909,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const severityClass = cardData.severity || 'unknown';
 
-            // Substatus dropdown (only for beta testing cards)
+            // Substatus dropdown — shown for both beta-testing and alpha-polish.
+            // Both columns run the same micro-lifecycle (planning -> coding ->
+            // testing -> review); the only difference is scope. The original
+            // ARCH-DA5B0A2D proposal locked alpha to a single state, but in
+            // practice alpha-polish patches march through the same stages
+            // (see DEV-B5D5C0DE.alpha_polish_patches). The renderer + API
+            // already accept substatus on any column.
+            const SUBSTATUS_COLUMNS = ['beta testing', 'alpha polish'];
             let substatusHtml = '';
-            if (cardData.column_name === 'beta testing') {
+            if (SUBSTATUS_COLUMNS.includes(cardData.column_name)) {
                 const currentSubstatus = cardData.substatus || 'planning';
                 substatusHtml = `
                     <div class="kanban-card-substatus">
