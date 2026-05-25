@@ -250,7 +250,10 @@ def get_system_load() -> Dict[str, Any]:
         gpu_probe_error = None
 
         try:
-            import pynvml
+            import warnings
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", category=FutureWarning, module="pynvml")
+                import pynvml
             pynvml.nvmlInit()
             try:
                 gpu_count = pynvml.nvmlDeviceGetCount()
