@@ -42,7 +42,6 @@ document.addEventListener('DOMContentLoaded', () => {
     let currentSelection = { type: null, key: null };
     let hasChanges = false;
     let systemLoadInterval = null;
-    let recentOrchestrations = []; // Store recent runs
     let chatHistory = []; // Store conversation history for role chat
     let currentChatRole = null; // Currently selected role for chat
 
@@ -818,27 +817,10 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    function updateRecentActivity() {
-        const container = document.getElementById('home-recent');
-        if (!container) return;
-        
-        if (recentOrchestrations.length > 0) {
-            container.innerHTML = recentOrchestrations.slice(0, 5).map(item => `
-                <div class="recent-item">
-                    <span class="pattern">${item.pattern}</span>
-                    <span class="time">${new Date(item.timestamp).toLocaleTimeString()}</span>
-                </div>
-            `).join('');
-        } else {
-            container.innerHTML = '<p class="placeholder">No recent activity</p>';
-        }
-    }
-
     async function initializeHome() {
         await updateSystemLoad();
         await updateHomeLoadedModels();
         updateHomeEmptySeats();
-        updateRecentActivity();
         
         // Start polling for system load
         if (systemLoadInterval) clearInterval(systemLoadInterval);
@@ -1123,16 +1105,6 @@ document.addEventListener('DOMContentLoaded', () => {
             });
             const ms = Math.round(performance.now() - t0);
             
-            // Record this run for recent activity
-            recentOrchestrations.unshift({
-                pattern: result.pattern || cmd,
-                timestamp: Date.now(),
-                duration: ms,
-                task_id: result.task_id
-            });
-            // Keep only last 10
-            recentOrchestrations = recentOrchestrations.slice(0, 10);
-            
             outMeta.innerHTML =
                 `<span class="ok">Pattern: ${result.pattern || cmd}</span>` +
                 `<span>Task: ${result.task_id || '—'}</span>` +
@@ -1174,12 +1146,6 @@ document.addEventListener('DOMContentLoaded', () => {
     saveBtn.addEventListener('click', handleSaveClick);
     tabs.forEach(tab => tab.addEventListener('click', handleTabClick));
     
-    // Load Obsidian Preset button
-    const loadPresetBtn = document.getElementById('load-preset-btn');
-    if (loadPresetBtn) {
-        loadPresetBtn.addEventListener('click', handleLoadObsidianPreset);
-    }
-    
     // Add Role and Meeting buttons
     const addRoleBtn = document.getElementById('add-role-btn');
     const addMeetingBtn = document.getElementById('add-meeting-btn');
@@ -1214,8 +1180,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const logData = {
                 timestamp: new Date().toISOString(),
                 metadata: outMeta ? outMeta.innerText : '',
-                response: outResp ? outResp.innerText : '',
-                orchestrations: recentOrchestrations
+                response: outResp ? outResp.innerText : ''
             };
             
             // Create downloadable file
@@ -1301,29 +1266,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 alert('Failed to push to Obsidian: ' + error.message);
             }
         });
-    }
-    
-    async function handleLoadObsidianPreset() {
-        // This would integrate with Obsidian's API or a file picker
-        // For now, we'll show a simple prompt
-        const presetPath = prompt('Enter the path to your Obsidian chat preset file:');
-        if (!presetPath) return;
-        
-        try {
-            // In a real implementation, this would read the file and parse it
-            // For now, we'll just show a success message
-            alert('Obsidian preset loading functionality will be implemented with the Obsidian plugin integration.');
-            
-            // TODO: Implement actual preset loading logic
-            // This would involve:
-            // 1. Reading the preset file from Obsidian vault
-            // 2. Parsing the preset format
-            // 3. Applying settings to roles/models
-            // 4. Saving the updated config
-        } catch (error) {
-            console.error('Error loading Obsidian preset:', error);
-            alert('Failed to load preset: ' + error.message);
-        }
     }
     
     async function handleAddRole() {

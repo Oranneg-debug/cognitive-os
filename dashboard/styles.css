@@ -544,6 +544,8 @@ header {
 .home-page {
     padding: 1.5rem;
     color: var(--text-color);
+    overflow-y: auto;
+    height: 100%;
 }
 
 .home-page h1 {
@@ -695,82 +697,6 @@ header {
 }
 
 /* Quick Actions */
-.quick-actions {
-    margin: 2rem 0;
-}
-
-.quick-actions h2 {
-    color: var(--text-color);
-    font-size: 1.3rem;
-    margin-bottom: 1rem;
-    border-bottom: 1px solid var(--border-color);
-    padding-bottom: 0.5rem;
-}
-
-.action-buttons {
-    display: flex;
-    gap: 1rem;
-    flex-wrap: wrap;
-}
-
-.action-btn {
-    padding: 0.8rem 1.5rem;
-    background: var(--button-bg);
-    color: var(--button-text);
-    border: 1px solid var(--highlight-color);
-    border-radius: 5px;
-    cursor: pointer;
-    font-size: 1rem;
-    font-weight: 600;
-    transition: all 0.2s;
-}
-
-.action-btn:hover {
-    background: var(--highlight-color);
-    box-shadow: 0 0 10px var(--highlight-color);
-    transform: translateY(-2px);
-}
-
-/* Recent Activity */
-.recent-activity h2 {
-    color: var(--text-color);
-    font-size: 1.3rem;
-    margin-bottom: 1rem;
-    border-bottom: 1px solid var(--border-color);
-    padding-bottom: 0.5rem;
-}
-
-.recent-list {
-    background: var(--input-bg);
-    border: 1px solid var(--border-color);
-    border-radius: 5px;
-    padding: 1rem;
-    max-height: 300px;
-    overflow-y: auto;
-}
-
-.recent-item {
-    padding: 0.8rem;
-    border-bottom: 1px solid #1f1f1f;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-}
-
-.recent-item:last-child {
-    border-bottom: none;
-}
-
-.recent-item .pattern {
-    color: var(--success-color);
-    font-size: 0.9rem;
-}
-
-.recent-item .time {
-    color: #6e6e6e;
-    font-size: 0.85rem;
-}
-
 /* Empty Seat Badge for Sidebar */
 .empty-seat-badge {
     display: inline-block;
