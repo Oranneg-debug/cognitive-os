@@ -10,19 +10,6 @@
     <div class="container">
         <aside class="sidebar">
             <h1>🧠 Cognitive OS Control Center</h1>
-            <nav>
-                <h2>Roles</h2>
-                <ul id="roles-list">
-                    <!-- Roles will be dynamically inserted here -->
-                </ul>
-                <button id="add-role-btn" class="add-item-btn">+ Add New Role</button>
-                <button id="add-meeting-btn" class="add-item-btn">+ Create New Meeting Type</button>
-                
-                <h2>Base Models</h2>
-                <ul id="models-list">
-                    <!-- Models will be dynamically inserted here -->
-                </ul>
-            </nav>
             
             <!-- System Status Cards -->
             <div class="sidebar-status">
@@ -139,15 +126,27 @@
             </div>
 
             <div id="config" class="tab-content">
-                <div class="test-panel-container">
-                    <h1 id="config-title">Select a Role or Model to Configure</h1>
-                    <div class="test-panel-inline">
-                         <!-- Test panel removed from here as it lives in the sidebar -->
+                <div class="config-page">
+                    <div class="config-sidebar">
+                        <h2>Roles</h2>
+                        <ul id="roles-list">
+                            <!-- Roles will be dynamically inserted here -->
+                        </ul>
+                        <button id="add-role-btn" class="add-item-btn">+ Add New Role</button>
+                        <button id="add-meeting-btn" class="add-item-btn">+ Create New Meeting Type</button>
+                        
+                        <h2>Base Models</h2>
+                        <ul id="models-list">
+                            <!-- Models will be dynamically inserted here -->
+                        </ul>
                     </div>
-                </div>
-                <div id="config-panel" class="config-panel">
-                    <!-- Configuration form will be built here -->
-                    <p class="placeholder">Select an item from the sidebar to view and edit its configuration.</p>
+                    <div class="config-main">
+                        <h1 id="config-title">Select a Role or Model to Configure</h1>
+                        <div id="config-panel" class="config-panel">
+                            <!-- Configuration form will be built here -->
+                            <p class="placeholder">Select an item from the list to view and edit its configuration.</p>
+                        </div>
+                    </div>
                 </div>
             </div>
 

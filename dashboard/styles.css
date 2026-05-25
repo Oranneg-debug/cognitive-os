@@ -102,6 +102,34 @@ header {
     display: none;
 }
 
+.config-page {
+    display: flex;
+    height: 100%;
+    overflow: hidden;
+}
+
+.config-sidebar {
+    width: 280px;
+    background-color: var(--sidebar-bg);
+    padding: 20px;
+    overflow-y: auto;
+    border-right: 1px solid var(--border-color);
+}
+
+.config-main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.config-main h1 {
+    padding: 20px 30px;
+    margin: 0;
+    border-bottom: 1px solid var(--border-color);
+    background-color: var(--sidebar-bg);
+}
+
 .config-panel {
     flex: 1;
     padding: 30px;
@@ -117,7 +145,7 @@ header {
     text-shadow: 0 0 5px var(--highlight-color);
 }
 
-.sidebar h2, #roles-list h2 { /* Target h2 elements in both sidebar and the new roles list */
+.sidebar h2, #roles-list h2, .config-sidebar h2 {
     font-family: Georgia, 'Times New Roman', Times, serif;
     cursor: pointer;
     position: relative;
@@ -130,7 +158,7 @@ header {
     padding-bottom: 5px;
 }
 
-.sidebar h2::before, #roles-list h2::before {
+.sidebar h2::before, #roles-list h2::before, .config-sidebar h2::before {
     content: '▼';
     position: absolute;
     right: 10px;
@@ -138,17 +166,17 @@ header {
     transition: transform 0.2s ease-in-out;
 }
 
-.sidebar h2.collapsed::before, #roles-list h2.collapsed::before {
+.sidebar h2.collapsed::before, #roles-list h2.collapsed::before, .config-sidebar h2.collapsed::before {
     transform: rotate(-90deg);
 }
 
-.sidebar ul {
+.sidebar ul, .config-sidebar ul {
     list-style: none;
     padding: 0;
     margin: 0;
 }
 
-.sidebar ul li {
+.sidebar ul li, .config-sidebar ul li {
     padding: 10px 15px;
     cursor: pointer;
     border-radius: 5px;
@@ -156,12 +184,12 @@ header {
     border: 1px solid transparent;
 }
 
-.sidebar ul li:hover {
+.sidebar ul li:hover, .config-sidebar ul li:hover {
     background-color: rgba(196, 30, 58, 0.2);
     color: var(--highlight-color);
 }
 
-.sidebar ul li.active {
+.sidebar ul li.active, .config-sidebar ul li.active {
     background-color: var(--highlight-color);
     color: var(--button-text);
     text-shadow: 0 0 8px rgba(0,0,0,0.5);
@@ -1326,8 +1354,8 @@ header {
 .lms-log-panel em            { color: var(--lms-ink-dim); }
 /* Add Item Buttons */
 .add-item-btn, .add-role-category-btn {
-    width: calc(100% - 20px);
-    margin: 10px;
+    width: 100%;
+    margin: 10px 0;
     padding: 8px;
     background: rgba(201, 162, 39, 0.1);
     border: 1px solid var(--gold-color);
