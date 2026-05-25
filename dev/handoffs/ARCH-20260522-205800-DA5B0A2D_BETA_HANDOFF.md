@@ -81,7 +81,17 @@ When a user references this handoff (e.g. *"work on ARCH-20260522-205800-DA5B0A2
 
 ### Section C — Obsidian Plugin
 
-- [ ] **[✏️ PLANNER] C1. Update Obsidian plugin to remove dev-triggers and add command for dashboard Kanban**
+- [x] **[✏️ PLANNER] C1. Update Obsidian plugin to remove dev-triggers and add command for dashboard Kanban**
+   - [x] Stripped dev-process triggers (`#technical`, `#boardroom`, `#dev`) from:
+       - `src/editor-commands.ts` — 3 command registrations removed
+       - `src/file-commands.ts` — 3 file-menu items removed
+       - `src/main.ts` — 3 canvas-menu items + 3 editor-menu items removed
+       - `src/settings.ts` — Technical Council Prompt + Boardroom Prompt UI rows removed
+   - [x] Kept user-side commands intact: `#oracle`, `#design`, `#vision`, auto-route
+   - [x] `cogTechPrompt` / `cogBoardroomPrompt` storage keys retained for backward compat (inert, removable in v1.3.0)
+   - [x] `npm run build` clean, bundle rebuilt
+   - [x] Acceptance grep `grep -rn "'/dev'\|'/technical'\|'/boardroom'" obsidian-lmstudio-agent/src/` returns **0 hits**
+   - [ ] Commit to the plugin's own git repo (`obsidian-lmstudio-agent/`) — left for the user; plugin repo has pre-existing WIP that needs separate triage
    - [ ] Remove script handlers
    - [ ] Add 'Open Dashboard Kanban' command
    - **Acceptance:** Obsidian users can access the dashboard Kanban via a single click
