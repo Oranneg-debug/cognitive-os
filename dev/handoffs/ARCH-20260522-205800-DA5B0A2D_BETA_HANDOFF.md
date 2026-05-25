@@ -72,7 +72,7 @@ When a user references this handoff (e.g. *"work on ARCH-20260522-205800-DA5B0A2
 
 ### Section B — Migration
 
-- [ ] **[✏️ PLANNER] B1. Write scripts/migrate_kanban_to_sqlite.py for idempotent migration**
+- [x] **[✏️ PLANNER] B1. Write scripts/migrate_kanban_to_sqlite.py for idempotent migration**
    - [ ] Read current state from markdown and cache
    - [ ] Insert into SQLite
    - **Acceptance:** All 55+ cards are migrated to SQLite without data loss
