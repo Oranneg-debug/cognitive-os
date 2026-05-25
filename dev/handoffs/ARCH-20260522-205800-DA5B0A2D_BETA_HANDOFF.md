@@ -39,7 +39,7 @@ When a user references this handoff (e.g. *"work on ARCH-20260522-205800-DA5B0A2
    - **Constraints:** H1, M9
    - **Files:** `src/kanban_store.py`
 
-- [ ] **[✏️ PLANNER] A2. Implement src/kanban_renderer.py for markdown rendering and atomic writes**
+- [x] **[✏️ PLANNER] A2. Implement src/kanban_renderer.py for markdown rendering and atomic writes**
    - [ ] Create pure render function
    - [ ] Atomic write via tmp+rename
    - **Acceptance:** Dev-KanBan.md is regenerated atomically from SQLite state
