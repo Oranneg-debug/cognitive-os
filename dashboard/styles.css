@@ -1663,6 +1663,27 @@ header {
  * The old rules below set background on the whole pill (label + dot),
  * which made the dot invisible. Removed in favour of the dot rules. */
 
+/* Proposal ID footer (small mono badge so the user can refer to it).
+ * Added 2026-05-25 after the user asked "how do I know how to refer to
+ * a proposal when the card id isn't on the card". */
+.kanban-card-id {
+    margin-top: 0.5rem;
+    padding: 4px 8px;
+    background: rgba(255,255,255,0.04);
+    border-radius: 4px;
+    font-family: 'Consolas', 'Monaco', monospace;
+    font-size: 0.7rem;
+    color: #888;
+    user-select: all;        /* triple-click selects the whole id */
+    cursor: copy;
+    word-break: break-all;
+}
+
+.kanban-card-id:hover {
+    background: rgba(255,255,255,0.08);
+    color: #b0b0b0;
+}
+
 /* Beta Testing Substatus Dropdown */
 .kanban-card-substatus {
     margin-top: 0.75rem;

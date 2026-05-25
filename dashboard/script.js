@@ -1939,6 +1939,10 @@ document.addEventListener('DOMContentLoaded', () => {
             // happens for cards migrated from the legacy vault that lacked
             // a frontmatter `title` field. An untitled card is unreadable.
             const displayTitle = cardData.title || cardData.proposal_id;
+            // Compact ID: keep prefix-shortdate-hash readable; the full id
+            // (e.g. ARCH-20260524-011510-5DFB393F) is too long for a card
+            // footer but the user needs *some* way to refer to it in chat.
+            const shortId = cardData.proposal_id;
 
             card.innerHTML = `
                 <div class="kanban-card-header">
@@ -1951,6 +1955,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         <span>${severityClass.toUpperCase()}</span>
                     </span>
                 </div>
+                <div class="kanban-card-id" title="Click card to copy this id">${escapeHtml(shortId)}</div>
                 ${substatusHtml}
             `;
 
@@ -1958,11 +1963,21 @@ document.addEventListener('DOMContentLoaded', () => {
             card.addEventListener('dragstart', handleDragStart);
             card.addEventListener('dragend', handleDragEnd);
 
-            // Click to show history
+            // Click to show history, EXCEPT:
+            //  - clicks on the substatus dropdown (own handler)
+            //  - clicks on the proposal-id badge (copy to clipboard instead)
             card.addEventListener('click', (e) => {
-                if (!e.target.classList.contains('beta-substatus')) {
-                    showHistory(cardData.proposal_id);
+                if (e.target.classList.contains('beta-substatus')) return;
+                if (e.target.classList.contains('kanban-card-id')) {
+                    navigator.clipboard.writeText(cardData.proposal_id).then(() => {
+                        const el = e.target;
+                        const orig = el.textContent;
+                        el.textContent = 'copied!';
+                        setTimeout(() => { el.textContent = orig; }, 900);
+                    }).catch(() => { /* ignore - non-https origins refuse */ });
+                    return;
                 }
+                showHistory(cardData.proposal_id);
             });
 
             return card;

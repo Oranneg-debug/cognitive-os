@@ -1044,19 +1044,41 @@ async def add_kanban_card(req: AddCardRequest):
     }
 
 
+#: Default substatus when a card enters a column that runs a micro-
+#: lifecycle (planning -> coding -> testing -> review). Applied only
+#: when the caller did NOT supply an explicit ``target_substatus``,
+#: so drag-drop into Beta/Alpha lands on ``planning`` automatically
+#: while substatus-dropdown changes (which DO supply a value) are
+#: untouched.
+_DEFAULT_SUBSTATUS_ON_ENTRY = {
+    "beta testing": "planning",
+    "alpha polish": "planning",
+}
+
+
 @app.post("/api/workflow/transition")
 async def transition_card(req: TransitionRequestPayload):
     """Move a card to a target column / substatus.
 
     Successful moves trigger a vault-mirror render so the Obsidian view
-    stays current. Mirror failures do NOT roll back the SQLite write —
+    stays current. Mirror failures do NOT roll back the SQLite write -
     the state store is the single source of truth.
+
+    When the caller omits ``target_substatus`` AND the destination column
+    is in ``_DEFAULT_SUBSTATUS_ON_ENTRY``, we seed the substatus so the
+    micro-lifecycle starts in 'planning' instead of None.
     """
+    # Don't overwrite an in-column substatus tweak (where dashboard *does*
+    # send target_substatus). Only seed when caller is silent.
+    effective_substatus = req.target_substatus
+    if effective_substatus is None:
+        effective_substatus = _DEFAULT_SUBSTATUS_ON_ENTRY.get(req.target_column)
+
     try:
         card = await kanban_store.move_card(
             proposal_id=req.proposal_id,
             target_column=req.target_column,
-            target_substatus=req.target_substatus,
+            target_substatus=effective_substatus,
             approver=req.approver,
             reason=req.reason,
             gate_passed=req.gate_passed,
