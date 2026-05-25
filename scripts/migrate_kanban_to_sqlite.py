@@ -419,6 +419,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         default=None,
         help="Override path to dev/proposals/ (mostly for tests).",
     )
+    parser.add_argument(
+        "--decisions-dir",
+        type=str,
+        default=None,
+        help="Override path to dev/decisions/ for the migration report (mostly for tests).",
+    )
     args = parser.parse_args(argv)
 
     logging.basicConfig(
@@ -428,7 +434,9 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     vault_path = Path(args.vault_file) if args.vault_file else KANBAN_FILE
     proposals_dir = Path(args.proposals_dir) if args.proposals_dir else PROPOSALS_DIR
-    decisions_dir = DEV_DIR / "decisions"
+    decisions_dir = (
+        Path(args.decisions_dir) if args.decisions_dir else DEV_DIR / "decisions"
+    )
 
     report = MigrationReport(
         mode="apply" if args.apply else "dry-run",
