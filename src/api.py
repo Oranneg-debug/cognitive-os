@@ -38,8 +38,9 @@ def _validate_failed_routings_dir() -> None:
 
 def _validate_routing_rules() -> None:
     """B2: Validate config/routing_rules.yaml loads cleanly."""
+    rules_path = Path(__file__).resolve().parent.parent / "config" / "routing_rules.yaml"
     try:
-        load_routing_rules()
+        load_routing_rules(rules_path)
         print("[STARTUP] routing_rules.yaml validated")
     except Exception as e:
         raise RuntimeError(
