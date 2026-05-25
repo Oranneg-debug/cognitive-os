@@ -46,7 +46,7 @@ When a user references this handoff (e.g. *"work on ARCH-20260522-205800-DA5B0A2
    - **Constraints:** H2
    - **Files:** `src/kanban_renderer.py`
 
-- [ ] **[✏️ PLANNER] A3. Extend FastAPI with endpoints for board sync, transitions, and rollback**
+- [x] **[✏️ PLANNER] A3. Extend FastAPI with endpoints for board sync, transitions, and rollback**
    - [ ] Define GET /api/kanban/board
    - [ ] Implement POST /api/workflow/transition
    - **Acceptance:** Dashboard API interacts exclusively with SQLite via kanban_store

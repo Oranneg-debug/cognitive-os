@@ -25,6 +25,18 @@ from src.paths import VAULT_ROOT, DEV_DIR
 from src.uow_recovery import run_recovery
 from src.approval_logger import ApprovalLogger
 
+# Dashboard kanban migration (ARCH-DA5B0A2D, A3)
+from src.kanban_store import (
+    CANONICAL_COLUMNS,
+    KNOWN_PREFIXES,
+    CardNotFound,
+    InvalidColumn,
+    InvalidPrefix,
+    KanbanStore,
+    KanbanStoreError,
+)
+from src.kanban_renderer import write_vault_mirror
+
 from fastapi.middleware.cors import CORSMiddleware
 
 
@@ -105,7 +117,8 @@ def _run_startup_validation() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """FastAPI lifespan: boot-time validation (Section B) + UoW recovery (A4).
+    """FastAPI lifespan: boot-time validation (Section B) + UoW recovery (A4)
+    + kanban_store schema init (ARCH-DA5B0A2D A3).
 
     Runs only when uvicorn starts the server, NOT on `import src.api`.
     This keeps tests, scripts, and tooling from triggering full startup side effects.
@@ -114,6 +127,9 @@ async def lifespan(app: FastAPI):
     print("[STARTUP] Running UoW recovery...")
     run_recovery()
     print("[STARTUP] UoW recovery completed.")
+    print("[STARTUP] Initialising kanban_store schema...")
+    await kanban_store.init_schema()
+    print("[STARTUP] kanban_store schema ready.")
     yield
     # No shutdown actions required at this time.
 
@@ -683,6 +699,10 @@ print("[GOV] OutputRouter initialized successfully")
 orchestrator = Orchestrator(output_router=output_router)  # A2: Direct injection
 obsidian = ObsidianWriter()
 
+# ARCH-DA5B0A2D (A3): SQLite-backed kanban store. Schema is created via
+# the lifespan hook so ``import src.api`` stays side-effect-free.
+kanban_store = KanbanStore()
+
 class PromptRequest(BaseModel):
     prompt: str
     image_base64: Optional[str] = None
@@ -899,6 +919,233 @@ def get_sync_history(limit: int = 10):
         return {"history": history, "count": len(history)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error getting sync history: {e}")
+
+
+# ============================================================================
+# Kanban Migration API (ARCH-20260522-205800-DA5B0A2D, A3)
+# ----------------------------------------------------------------------------
+# SQLite is now the single source of truth for board state. The vault
+# Dev-KanBan.md becomes a one-way render mirror (regenerated after every
+# successful transition via ``kanban_renderer.write_vault_mirror``).
+#
+# Endpoints:
+#   GET  /api/kanban/board               -> current BoardSnapshot
+#   POST /api/kanban/cards               -> add a new card
+#   POST /api/workflow/transition        -> move a card (writes vault mirror)
+#   POST /api/workflow/rollback/{id}     -> revert to the previous column
+#   GET  /api/workflow/state/{id}        -> card + last 10 transitions
+#
+# Per CSTR (proposal §"Difficulties"): every store call is async (uses
+# asyncio.to_thread under the hood) so the FastAPI event loop never blocks.
+# ============================================================================
+
+
+class AddCardRequest(BaseModel):
+    """Payload for ``POST /api/kanban/cards``."""
+
+    proposal_id: str
+    prefix: str
+    column_name: str = "backlog"
+    title: Optional[str] = None
+    substatus: Optional[str] = None
+    severity: Optional[str] = None
+    origin: Optional[str] = None
+    approver: str = "dashboard"
+    reason: Optional[str] = None
+
+
+class TransitionRequestPayload(BaseModel):
+    """Payload for ``POST /api/workflow/transition``.
+
+    Naming note: the existing ``src.workflow_models.TransitionRequest`` is
+    a Pydantic model used by ``workflow_engine``. To avoid name-collision
+    confusion at the API layer, we shape this slightly differently and
+    keep the suffix ``Payload``. ``workflow_engine.transition`` is NOT
+    invoked here — that's a Phase 3+4 concern (gate enforcement, sagas).
+    This endpoint is the dashboard-side drag-drop signal: it updates the
+    board state directly. Gate enforcement is layered in by a later
+    proposal that wraps the call.
+    """
+
+    proposal_id: str
+    target_column: str
+    target_substatus: Optional[str] = None
+    approver: str = "dashboard"
+    reason: Optional[str] = None
+    gate_passed: int = 0  # -1 failed | 0 N/A | 1 passed
+    gate_details: Optional[Dict[str, Any]] = None
+    archive_hash: Optional[str] = None
+
+
+async def _render_vault_mirror_safely() -> Optional[str]:
+    """Render the current board to the vault. Best-effort.
+
+    Mirror failures are non-fatal — the SQLite state is authoritative and
+    a stale ``Dev-KanBan.md`` is a cosmetic glitch, not a data-loss event.
+    We return the path written (as a string) on success, or ``None`` on
+    failure, so callers can include it in their response payload.
+    """
+    try:
+        snap = await kanban_store.get_board()
+        path = await asyncio.to_thread(write_vault_mirror, snap)
+        return str(path)
+    except Exception as exc:  # noqa: BLE001 — defensive at the API edge
+        print(f"[KANBAN MIRROR] Failed to render vault mirror: {exc!r}")
+        return None
+
+
+@app.get("/api/kanban/board")
+async def get_kanban_board():
+    """Return the full board snapshot, columns in canonical order."""
+    try:
+        snap = await kanban_store.get_board()
+        return snap.to_dict()
+    except KanbanStoreError as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/api/kanban/cards")
+async def add_kanban_card(req: AddCardRequest):
+    """Add a new card. Idempotent: returns the existing card if already filed."""
+    try:
+        card = await kanban_store.add_card(
+            proposal_id=req.proposal_id,
+            prefix=req.prefix,
+            column_name=req.column_name,
+            title=req.title,
+            substatus=req.substatus,
+            severity=req.severity,
+            origin=req.origin,
+            approver=req.approver,
+            reason=req.reason,
+        )
+    except InvalidColumn as exc:
+        raise HTTPException(status_code=422, detail=f"Invalid column: {exc}")
+    except InvalidPrefix as exc:
+        raise HTTPException(status_code=422, detail=f"Invalid prefix: {exc}")
+    except KanbanStoreError as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    vault_path = await _render_vault_mirror_safely()
+    return {
+        "status": "success",
+        "card": card.to_dict(),
+        "vault_mirror": vault_path,
+    }
+
+
+@app.post("/api/workflow/transition")
+async def transition_card(req: TransitionRequestPayload):
+    """Move a card to a target column / substatus.
+
+    Successful moves trigger a vault-mirror render so the Obsidian view
+    stays current. Mirror failures do NOT roll back the SQLite write —
+    the state store is the single source of truth.
+    """
+    try:
+        card = await kanban_store.move_card(
+            proposal_id=req.proposal_id,
+            target_column=req.target_column,
+            target_substatus=req.target_substatus,
+            approver=req.approver,
+            reason=req.reason,
+            gate_passed=req.gate_passed,
+            gate_details=req.gate_details,
+            archive_hash=req.archive_hash,
+        )
+    except CardNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except InvalidColumn as exc:
+        raise HTTPException(status_code=422, detail=f"Invalid target_column: {exc}")
+    except ValueError as exc:
+        # Catches the gate_passed-out-of-range guard in kanban_store
+        raise HTTPException(status_code=422, detail=str(exc))
+    except KanbanStoreError as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    vault_path = await _render_vault_mirror_safely()
+    return {
+        "status": "success",
+        "card": card.to_dict(),
+        "vault_mirror": vault_path,
+    }
+
+
+@app.post("/api/workflow/rollback/{proposal_id}")
+async def rollback_transition(proposal_id: str, approver: str = "dashboard"):
+    """Revert the most recent transition by re-applying the prior column.
+
+    Reads ``transitions`` history; takes the **second-most-recent** row's
+    ``to_column`` as the previous state and moves the card back there.
+    The rollback itself is logged as a new transition row (we never
+    delete history — append-only).
+
+    Returns 404 if the card doesn't exist or has only one transition row
+    (i.e. nothing to roll back to).
+    """
+    history = await kanban_store.history(proposal_id, limit=2)
+    if not history:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No card or history found for {proposal_id!r}",
+        )
+    if len(history) < 2:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Card {proposal_id!r} has only its initial row; nothing to roll back",
+        )
+
+    # history is chronological; the second-to-last row is the previous state.
+    previous = history[-2]
+    prior_column = previous.to_column
+    prior_substatus = previous.to_substatus
+
+    try:
+        card = await kanban_store.move_card(
+            proposal_id=proposal_id,
+            target_column=prior_column,
+            target_substatus=prior_substatus,
+            approver=approver,
+            reason=f"rollback to transition id={previous.id}",
+            gate_passed=0,
+        )
+    except CardNotFound as exc:
+        # Shouldn't happen given the history check above, but be defensive.
+        raise HTTPException(status_code=404, detail=str(exc))
+    except KanbanStoreError as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    vault_path = await _render_vault_mirror_safely()
+    return {
+        "status": "success",
+        "rolled_back_to": prior_column,
+        "card": card.to_dict(),
+        "vault_mirror": vault_path,
+    }
+
+
+@app.get("/api/workflow/state/{proposal_id}")
+async def get_workflow_state(proposal_id: str, history_limit: int = 10):
+    """Return the card + its most recent transitions (default last 10).
+
+    Used by the dashboard's "history drawer" per the proposal spec.
+    Pass ``?history_limit=0`` to get only the card without history;
+    ``?history_limit=`` (omitted) defaults to 10.
+    """
+    card = await kanban_store.get_card(proposal_id)
+    if card is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No card found for proposal_id={proposal_id!r}",
+        )
+
+    limit = history_limit if history_limit > 0 else None
+    history = await kanban_store.history(proposal_id, limit=limit)
+    return {
+        "card": card.to_dict(),
+        "history": [t.to_dict() for t in history],
+        "history_count": len(history),
+    }
 
 
 # Mount the static directory for the dashboard AFTER all other API routes
