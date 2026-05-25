@@ -569,4 +569,30 @@ roles:
     gpu_layers: -1
     reasoning_enabled: true
     batch_size: 1024
+  handoff_planner:
+    # ARCH-5DFB393F (A1) — Decomposes a council verdict into a
+    # code-ready implementation checklist for the receiving editor.
+    # The actual system prompt is the module constant
+    # `_PLANNER_SYSTEM_PROMPT` in src/handoff_planner.py (kept as code,
+    # not config, because it contains worked markdown examples that are
+    # painful to wrangle inside a YAML string).
+    model: ministral-3-3b-instruct-2512
+    compass_weight: IGNORE
+    system_prompt: "See _PLANNER_SYSTEM_PROMPT in src/handoff_planner.py — kept as Python module constant for legibility."
+    temperature: 0.3
+    top_p: 0.9
+    top_k: 40
+    min_p: 0.1
+    max_tokens: 8192
+    context_window: 131072
+    gpu_layers: -1
+    n_parallel: 1
+    enabled: true
+
+handoff:
+  # ARCH-5DFB393F (A11) — When true (default), HandoffWriter calls
+  # HandoffPlanner.plan() to produce the `## 🔧 Implementation Tasks`
+  # block. When false, falls back to the legacy regex extractor in
+  # handoff_writer.py.
+  planner_enabled: true
 ```
