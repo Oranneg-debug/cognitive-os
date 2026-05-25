@@ -37,8 +37,10 @@ def _load_undo_log(log_path: Path) -> Optional[Dict[str, Any]]:
         with open(log_path, "r", encoding="utf-8") as f:
             return json.load(f)
     except (json.JSONDecodeError, OSError) as e:
+        # Filename pattern is "<uow_id>.undo.json"; .stem only strips ".json"
+        # so we strip the doubled suffix manually for diagnostic clarity.
         raise UoWRecoveryError(
-            uow_id=log_path.stem,
+            uow_id=log_path.name.removesuffix(".undo.json"),
             reason=f"Failed to parse undo log: {e}"
         ) from e
 
@@ -132,8 +134,13 @@ def run_recovery() -> Dict[str, Any]:
     undo_logs = list(UOW_LOG_DIR.glob("*.undo.json"))
     
     for log_path in undo_logs:
-        uow_id = log_path.stem
-        
+        # log_path is "<uow_id>.undo.json"; .stem strips only ".json" so it
+        # yields "<uow_id>.undo". The authoritative uow_id is in the JSON
+        # body (uow_data["uow_id"]). Fall back to the filename stem only
+        # when the body cannot be loaded (malformed JSON) so warnings still
+        # have something to reference.
+        fallback_uow_id = log_path.name.removesuffix(".undo.json")
+
         try:
             undo_data = _load_undo_log(log_path)
             if undo_data is None:
@@ -141,7 +148,8 @@ def run_recovery() -> Dict[str, Any]:
                     f"Skipping {log_path}: failed to load undo log"
                 )
                 continue
-            
+
+            uow_id = undo_data.get("uow_id") or fallback_uow_id
             status = undo_data.get("status", "staged")
             
             # Only rollback if not yet committed
