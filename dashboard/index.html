@@ -23,7 +23,50 @@
                     <!-- Models will be dynamically inserted here -->
                 </ul>
             </nav>
-            <!-- Test panel removed - use unified chatbox on Homepage instead -->
+            
+            <!-- System Status Cards -->
+            <div class="sidebar-status">
+                <div class="status-card">
+                    <h3>System Load</h3>
+                    <div class="metrics">
+                        <div class="metric">
+                            <label>CPU</label>
+                            <div class="metric-bar">
+                                <div class="metric-fill cpu-fill" id="cpu-bar"></div>
+                                <span class="metric-text" id="cpu-text">--</span>
+                            </div>
+                        </div>
+                        <div class="metric">
+                            <label>Memory</label>
+                            <div class="metric-bar">
+                                <div class="metric-fill ram-fill" id="ram-bar"></div>
+                                <span class="metric-text" id="ram-text">--</span>
+                            </div>
+                        </div>
+                        <div class="metric">
+                            <label>GPU</label>
+                            <div class="metric-bar">
+                                <div class="metric-fill gpu-fill" id="gpu-bar"></div>
+                                <span class="metric-text" id="gpu-text">--</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="status-card">
+                    <h3>Model Status</h3>
+                    <div id="home-loaded-models" class="model-list">
+                        <p class="placeholder">Loading models...</p>
+                    </div>
+                </div>
+                
+                <div class="status-card">
+                    <h3>Empty Seats</h3>
+                    <div id="home-empty-seats" class="empty-seats-list">
+                        <p class="placeholder">Checking roles...</p>
+                    </div>
+                </div>
+            </div>
         </aside>
         <main class="main-content">
             <header>
@@ -44,50 +87,6 @@
 
             <div id="home" class="tab-content active">
                 <div class="home-page">
-                    <!-- System Status Cards -->
-                    <div class="status-grid">
-                        <div class="status-card">
-                            <h3>System Load</h3>
-                            <div class="metrics">
-                                <div class="metric">
-                                    <label>CPU</label>
-                                    <div class="metric-bar">
-                                        <div class="metric-fill cpu-fill" id="cpu-bar"></div>
-                                        <span class="metric-text" id="cpu-text">--</span>
-                                    </div>
-                                </div>
-                                <div class="metric">
-                                    <label>Memory</label>
-                                    <div class="metric-bar">
-                                        <div class="metric-fill ram-fill" id="ram-bar"></div>
-                                        <span class="metric-text" id="ram-text">--</span>
-                                    </div>
-                                </div>
-                                <div class="metric">
-                                    <label>GPU</label>
-                                    <div class="metric-bar">
-                                        <div class="metric-fill gpu-fill" id="gpu-bar"></div>
-                                        <span class="metric-text" id="gpu-text">--</span>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                        
-                        <div class="status-card">
-                            <h3>Model Status</h3>
-                            <div id="home-loaded-models" class="model-list">
-                                <p class="placeholder">Loading models...</p>
-                            </div>
-                        </div>
-                        
-                        <div class="status-card">
-                            <h3>Empty Seats</h3>
-                            <div id="home-empty-seats" class="empty-seats-list">
-                                <p class="placeholder">Checking roles...</p>
-                            </div>
-                        </div>
-                    </div>
-                    
                     <!-- Unified Chatbox -->
                     <div class="unified-chatbox">
                         <h2>💬 Cognitive OS Chat</h2>
