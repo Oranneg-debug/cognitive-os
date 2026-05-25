@@ -722,7 +722,7 @@ class PromptRequest(BaseModel):
     is_pdf: Optional[bool] = None
     source_file_path: Optional[str] = None
 
-@app.post("/process")
+@app.post("/api/process")
 def process_prompt(request: PromptRequest):
     """
     Receives a prompt from Obsidian or other interfaces,
