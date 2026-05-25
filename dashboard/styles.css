@@ -1725,6 +1725,14 @@ header {
     max-width: 90%;
 }
 
+/* CSS specificity guard: an ID selector (1,0,0) outranks the .is-hidden
+   class (0,1,0), so without this concatenated rule the banner would stay
+   visible even when `is-hidden` is applied. Bug surfaced on first paint:
+   the empty banner appeared with no dismiss path. */
+#kanban-error-banner.is-hidden {
+    display: none;
+}
+
 #kanban-error-banner .error-message {
     flex: 1;
     font-size: 0.95rem;
