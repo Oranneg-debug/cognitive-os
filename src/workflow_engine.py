@@ -143,9 +143,20 @@ class WorkflowEngine:
                 error=f"Proposal file not found: {proposal_path}"
             )
         
-        # Read current YAML
-        with open(proposal_path, 'r', encoding='utf-8') as f:
-            current_data = yaml.safe_load(f)
+        # Proposal files are markdown with a YAML frontmatter fence
+        # (``---\n<yaml>\n---\n<body>``). yaml.safe_load chokes on the
+        # closing ``---`` because PyYAML treats it as a multi-document
+        # stream separator. Extract just the frontmatter block.
+        raw = proposal_path.read_text(encoding='utf-8')
+        if raw.startswith('---\n'):
+            end = raw.find('\n---', 4)
+            if end == -1:
+                raise ValueError(
+                    f"Malformed frontmatter in {proposal_path}: no closing ---"
+                )
+            current_data = yaml.safe_load(raw[4:end]) or {}
+        else:
+            current_data = yaml.safe_load(raw) or {}
         
         # Compute current version_hash and verify (G3/T2 compliance)
         current_hash = self._compute_version_hash(current_data)
@@ -213,24 +224,35 @@ class WorkflowEngine:
                 compensate=tag_compensate
             ))
         
-        # Step 4: Write updated YAML (T2: version_hash update)
+        # Step 4: Write updated YAML (T2: version_hash update). Critical:
+        # rewrite ONLY the frontmatter block; the markdown body below
+        # ``---\n`` is the proposal text and must be preserved verbatim.
+        def _rewrite_frontmatter(updated_fm: Dict[str, Any]) -> None:
+            raw = proposal_path.read_text(encoding='utf-8')
+            if raw.startswith('---\n'):
+                end = raw.find('\n---', 4)
+                body = raw[end:] if end != -1 else ''
+            else:
+                body = '\n---\n' + raw
+            new_fm = yaml.dump(updated_fm, default_flow_style=False, sort_keys=False)
+            proposal_path.write_text(
+                f"---\n{new_fm}{body}",
+                encoding='utf-8',
+            )
+
         def yaml_action():
             current_data['phase'] = req.target_phase.value
             if req.target_substatus:
                 current_data['substatus'] = req.target_substatus
             current_data['approver'] = req.approver
             current_data['updated_at'] = datetime.utcnow().isoformat()
-            
-            # Write to file
-            with open(proposal_path, 'w', encoding='utf-8') as f:
-                yaml.dump(current_data, f, default_flow_style=False)
-        
+            _rewrite_frontmatter(current_data)
+
         def yaml_compensate():
             # Restore from snapshot
             snapshot = self._handoff_vault.get_latest(req.proposal_id)
             if snapshot:
-                with open(proposal_path, 'w', encoding='utf-8') as f:
-                    yaml.dump(snapshot, f, default_flow_style=False)
+                _rewrite_frontmatter(snapshot)
         
         saga_steps.append(SagaStep(
             name="write_yaml_update",
