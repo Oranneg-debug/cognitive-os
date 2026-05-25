@@ -1920,10 +1920,15 @@ document.addEventListener('DOMContentLoaded', () => {
             let substatusHtml = '';
             if (SUBSTATUS_COLUMNS.includes(cardData.column_name)) {
                 const currentSubstatus = cardData.substatus || 'planning';
+                // data-column carries the card's *current* column so the
+                // substatus handler can keep it in place. Without this the
+                // handler used to hard-code target_column='beta testing',
+                // silently moving alpha-polish cards into beta on every
+                // substatus change.
                 substatusHtml = `
                     <div class="kanban-card-substatus">
                         <label>Substatus</label>
-                        <select class="beta-substatus" data-proposal-id="${cardData.proposal_id}" data-prev-value="${currentSubstatus}">
+                        <select class="beta-substatus" data-proposal-id="${cardData.proposal_id}" data-prev-value="${currentSubstatus}" data-column="${cardData.column_name}">
                             ${VALID_SUBSTATUSES.map(s => `<option value="${s}" ${currentSubstatus === s ? 'selected' : ''}>${formatSubstatus(s)}</option>`).join('')}
                         </select>
                     </div>
@@ -2138,6 +2143,10 @@ document.addEventListener('DOMContentLoaded', () => {
             const select = e.target;
             const proposalId = select.dataset.proposalId;
             const newSubstatus = select.value;
+            // Keep the card in its CURRENT column. Reading the column from
+            // data-column (set in createCard) means the same handler works
+            // for both beta-testing and alpha-polish without conditionals.
+            const currentColumn = select.dataset.column || 'beta testing';
 
             try {
                 const response = await fetch(`${API_BASE}/api/workflow/transition`, {
@@ -2145,7 +2154,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         proposal_id: proposalId,
-                        target_column: 'beta testing',
+                        target_column: currentColumn,
                         target_substatus: newSubstatus,
                         gate_passed: 1
                     })
