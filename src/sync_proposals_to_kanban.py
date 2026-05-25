@@ -1,6 +1,32 @@
 """
-Sync proposal files to the Obsidian Kanban board — without going through
-the LLM proposal-refinement stage.
+Sync proposal files to the Obsidian Kanban board.
+
+╔══════════════════════════════════════════════════════════════════════╗
+║  DEPRECATED — superseded by ARCH-20260522-205800-DA5B0A2D            ║
+╠══════════════════════════════════════════════════════════════════════╣
+║                                                                       ║
+║  This script's job — discovering proposal files and getting them      ║
+║  onto the kanban board — is now done by:                              ║
+║                                                                       ║
+║    • One-shot backfill of existing proposals:                         ║
+║         python scripts/migrate_kanban_to_sqlite.py --apply            ║
+║                                                                       ║
+║    • Ongoing additions (e.g. after creating a new ARCH proposal):     ║
+║         POST /api/kanban/cards                                        ║
+║         …or via the dashboard's Kanban tab                            ║
+║                                                                       ║
+║  Running this script as-is now violates the DA5B0A2D veto point      ║
+║  "Two writers on Dev-KanBan.md" — only ``kanban_renderer`` is         ║
+║  allowed to touch the vault file. ``main()`` therefore refuses to     ║
+║  proceed and prints a redirect.                                       ║
+║                                                                       ║
+║  The parsing helpers (``_extract_proposal_from_file``, etc.) are     ║
+║  still importable for downstream tooling, but the main entry point   ║
+║  is gated. Removal targets v1.3.0.                                    ║
+║                                                                       ║
+╚══════════════════════════════════════════════════════════════════════╝
+
+Historical purpose (kept for context):
 
 When you (or the Systems Architect agent) author a thorough proposal
 directly as a markdown file under ``cognitive-os/dev/proposals/``, the
@@ -11,34 +37,16 @@ the kanban. This script bridges that gap:
   2. For each ``DEV-*_PROPOSAL.md`` not already in the kanban board:
      - Read its frontmatter (``phase``, ``status``) to decide which
        column it belongs in.
-     - Build a kanban card line that matches the watcher's regex
-       (title must contain the full ``DEV-YYYYMMDD-HHMMSS-XXXXXXXX`` form).
+     - Build a kanban card line that matches the watcher's regex.
      - Insert it under the right column.
   3. Print a summary + (if requested) the raw card lines for manual paste.
 
-Default destination column is ``## Proposal`` (not ``## Backlog``) — this
-is the "skip the refinement stage" semantic. Thorough, architect-authored
-proposals don't need the proposal-refine LLM pass; they go straight to the
-human-approval state.
+Under DA5B0A2D the SQLite store is the single source of truth and the
+markdown is regenerated. Direct markdown edits would be overwritten on
+the next render, so attempting them is now a no-op at best, harmful at
+worst (race against the renderer).
 
-Idempotency / safety rails
-~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-The script avoids re-adding any proposal that is **either** currently on
-the board **or** known to the kanban cache (``.kanban_cache.json``). The
-cache records every proposal the watcher has ever seen on the board, so
-proposals you intentionally removed (e.g. archived, cleaned out of
-Backlog) won't be silently resurrected. Pass ``--ignore-cache`` to bypass
-this guard.
-
-Usage:
-
-  python -m src.sync_proposals_to_kanban             # dry-run-friendly: print plan + execute
-  python -m src.sync_proposals_to_kanban --dry-run   # don't touch the kanban file
-  python -m src.sync_proposals_to_kanban --column "Backlog"   # override target column
-  python -m src.sync_proposals_to_kanban --only DEV-20260521-001000-B5D5C0DE
-
-Exit codes:
+Exit codes (historical — for the deprecated path):
   0 = success (cards added, or nothing to do)
   2 = kanban file unreachable (vault offline) — card lines printed for paste
   3 = malformed proposal frontmatter
@@ -49,10 +57,19 @@ import argparse
 import os
 import re
 import sys
+import warnings as _warnings
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Iterable
+
+_warnings.warn(
+    "src.sync_proposals_to_kanban is deprecated by ARCH-DA5B0A2D; "
+    "use scripts/migrate_kanban_to_sqlite.py for backfill, or "
+    "POST /api/kanban/cards for ongoing adds. Removal targets v1.3.0.",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
 # Optional yaml — fall back to a minimal frontmatter parser if not available
 try:
@@ -405,7 +422,34 @@ def _build_argparser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = _build_argparser().parse_args(argv)
+    # ARCH-DA5B0A2D (A6) — refuse to run. The vault Dev-KanBan.md is
+    # owned exclusively by ``kanban_renderer``; this script's markdown-
+    # editing behaviour would race with the renderer and violate the
+    # proposal's single-writer veto.
+    #
+    # Honour ``--force-legacy`` only when the caller explicitly opts in,
+    # so that history-debugging and reviewer-spot-checks remain possible
+    # without re-enabling the broken path in production.
+    if "--force-legacy" not in (argv or sys.argv[1:]):
+        # ASCII-only — Windows console (cp1252) chokes on em-dashes and arrows.
+        print(
+            "[sync_proposals_to_kanban] DEPRECATED -- superseded by ARCH-DA5B0A2D.\n"
+            "\n"
+            "  Two-writer races with kanban_renderer would corrupt the vault.\n"
+            "\n"
+            "  Use one of:\n"
+            "    - Backfill (one-time):  python scripts/migrate_kanban_to_sqlite.py --apply\n"
+            "    - Ongoing adds:         POST /api/kanban/cards\n"
+            "    - Dashboard:            http://127.0.0.1:5000/ -> System -> Kanban\n"
+            "\n"
+            "  Re-run with --force-legacy if you really need the old behaviour\n"
+            "  (e.g. recovering a corrupted vault before the migration runs).\n"
+        )
+        return 0
+
+    args = _build_argparser().parse_args(
+        [a for a in (argv if argv is not None else sys.argv[1:]) if a != "--force-legacy"]
+    )
     now = datetime.now()
 
     # 1. Discover proposal files.

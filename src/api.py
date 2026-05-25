@@ -118,10 +118,17 @@ def _run_startup_validation() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """FastAPI lifespan: boot-time validation (Section B) + UoW recovery (A4)
-    + kanban_store schema init (ARCH-DA5B0A2D A3).
+    + kanban_store schema init (ARCH-DA5B0A2D A3) + Orchestrator.boot.
 
     Runs only when uvicorn starts the server, NOT on `import src.api`.
     This keeps tests, scripts, and tooling from triggering full startup side effects.
+
+    The ``orchestrator.boot()`` call is what fires the VRAM eject + proposal-
+    sync health check. Pre-2026-05-25 those used to live in
+    ``Orchestrator.__init__`` and got triggered any time anything imported
+    ``src.api`` (pytest, scripts, planner-driven flows) — which silently
+    ejected models the user was actively working with. Splitting boot out
+    of construct closes that gap.
     """
     _run_startup_validation()
     print("[STARTUP] Running UoW recovery...")
@@ -130,6 +137,9 @@ async def lifespan(app: FastAPI):
     print("[STARTUP] Initialising kanban_store schema...")
     await kanban_store.init_schema()
     print("[STARTUP] kanban_store schema ready.")
+    print("[STARTUP] Booting orchestrator (VRAM flush + sync health check)...")
+    orchestrator.boot()
+    print("[STARTUP] Orchestrator boot complete.")
     yield
     # No shutdown actions required at this time.
 

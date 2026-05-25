@@ -65,7 +65,7 @@ When a user references this handoff (e.g. *"work on ARCH-20260522-205800-DA5B0A2
    - **Acceptance:** kanban_processor.py is a thin facade over kanban_store
    - **Files:** `src/kanban_processor.py`
 
-- [ ] **[✏️ PLANNER] A6. Refactor src/sync_proposals_to_kanban.py into a SQLite backfill tool**
+- [x] **[✏️ PLANNER] A6. Refactor src/sync_proposals_to_kanban.py into a SQLite backfill tool**
    - [ ] Drop markdown editing
    - **Acceptance:** Proposal content is synced to SQLite without manual markdown edits
    - **Files:** `src/sync_proposals_to_kanban.py`

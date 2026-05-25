@@ -134,14 +134,43 @@ class Orchestrator:
             if self.output_router is not None:
                 print("[LEGACY] integration.output_router_enabled=false; reverting Orchestrator to ObsidianWriter path")
             self.output_router = None
-        
+
+        # The heavy boot-time side-effects (VRAM flush + proposal-sync health
+        # check) used to fire here. They were moved into :meth:`boot` so that
+        # ``Orchestrator()`` itself is cheap to construct — tests, scripts,
+        # and any tooling that imports ``src.api`` no longer eject the user's
+        # in-use models. The FastAPI lifespan calls ``boot()`` explicitly on
+        # real server startup; nothing else should.
+        self._has_booted = False
+
+    def boot(self) -> None:
+        """Run the heavy startup side-effects exactly once.
+
+        Called from the FastAPI lifespan (``src.api:lifespan``) when the
+        process is the actual API server. Idempotent — subsequent calls
+        are no-ops, so re-entry via reload paths is safe.
+
+        Operations:
+          1. ``llm.eject_all_models(force_all=True)`` — clears VRAM so the
+             council starts from a known state.
+          2. ``self._perform_startup_sync_check()`` — proposal-sync health
+             check (logs RED/YELLOW/GREEN).
+
+        DO NOT call this from tests, scripts, or any code that just imports
+        ``src.api`` for its routes / models. The whole point of the boot/
+        construct split is that import is now side-effect-free.
+        """
+        if self._has_booted:
+            return
+        self._has_booted = True
+
         # Ensure a clean slate on startup by flushing ALL models (including embedder)
         print("🧹 Performing startup VRAM flush (Absolute)...")
         try:
             llm.eject_all_models(force_all=True)
         except Exception as e:
             print(f"⚠️ Startup flush failed (LM Studio might not be fully ready yet): {e}")
-        
+
         # Perform startup sync health check
         self._perform_startup_sync_check()
     
