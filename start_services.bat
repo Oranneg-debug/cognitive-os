@@ -18,7 +18,15 @@ cd /d "E:\Antigravity\cognitive-os"
 start /B "" cmd /c "timeout /t 10 /nobreak >nul && echo Loading embedder on CPU... && lms load text-embedding-bge-m3 --gpu off -y && echo Loading default LLM at 32K ctx on CPU... && lms load ministral-3-3b-instruct-2512 -c 32768 --gpu off -y"
 
 :: Start all services in a single Windows Terminal window.
+::
+:: Services that USED to be in this list and are now removed:
+::   - Kanban Watcher (python -m src.kanban_processor --watch)
+::     Deprecated by ARCH-DA5B0A2D (2026-05-25). The dashboard's
+::     Kanban tab + /api/workflow/transition own card movements now.
+::     Re-enabling the watcher would race the renderer and corrupt the
+::     vault mirror.
+::
 :: The Ollama Bridge translates Ollama protocol -> LM Studio OpenAI server so
 :: VS Code's BYOK "Ollama" provider can target the local model catalog.
 :: It must start AFTER lms server (which it proxies to), so it's last in the chain.
-wt -d "E:\Antigravity\cognitive-os" cmd /k "title LM Studio Server && lms server start --cors --bind 0.0.0.0" ; new-tab -d "E:\Antigravity\cognitive-os" cmd /k "title FastAPI Server && set PYTHONIOENCODING=utf-8 && python -m src.api" ; new-tab -d "E:\Antigravity\cognitive-os" cmd /k "title Telegram Server && set PYTHONIOENCODING=utf-8 && python -m src.telegram_bot" ; new-tab -d "E:\Antigravity\cognitive-os" cmd /k "title Kanban Watcher && set PYTHONIOENCODING=utf-8 && python -m src.kanban_processor --watch" ; new-tab -d "E:\Antigravity\obsidian-lmstudio-agent" cmd /k "title Obsidian Plugin Watcher (esbuild) && npm run dev" ; new-tab -d "E:\Antigravity\obsidian-lmstudio-agent" cmd /k "title Obsidian Plugin Deployer && node scripts/watch-and-deploy.js" ; new-tab -d "E:\Antigravity\cognitive-os" cmd /k "title Ollama Bridge (LM Studio -> VS Code BYOK) && set PYTHONIOENCODING=utf-8 && timeout /t 8 /nobreak >nul && python scratch/lms_ollama_bridge.py"
+wt -d "E:\Antigravity\cognitive-os" cmd /k "title LM Studio Server && lms server start --cors --bind 0.0.0.0" ; new-tab -d "E:\Antigravity\cognitive-os" cmd /k "title FastAPI Server && set PYTHONIOENCODING=utf-8 && python -m src.api" ; new-tab -d "E:\Antigravity\cognitive-os" cmd /k "title Telegram Server && set PYTHONIOENCODING=utf-8 && python -m src.telegram_bot" ; new-tab -d "E:\Antigravity\obsidian-lmstudio-agent" cmd /k "title Obsidian Plugin Watcher (esbuild) && npm run dev" ; new-tab -d "E:\Antigravity\obsidian-lmstudio-agent" cmd /k "title Obsidian Plugin Deployer && node scripts/watch-and-deploy.js" ; new-tab -d "E:\Antigravity\cognitive-os" cmd /k "title Ollama Bridge (LM Studio -> VS Code BYOK) && set PYTHONIOENCODING=utf-8 && timeout /t 8 /nobreak >nul && python scratch/lms_ollama_bridge.py"

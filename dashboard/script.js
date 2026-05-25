@@ -770,6 +770,16 @@ document.addEventListener('DOMContentLoaded', () => {
         if (targetPanel) {
             targetPanel.classList.add('active');
             
+            // ARCH-DA5B0A2D (A4): the 'kanban' subtab is owned by window.Kanban
+            // (see the KANBAN WORKFLOW MODULE block below). Do NOT run
+            // loadDiagram() for it — that would clobber the Kanban DOM with
+            // a mermaid chart fetched from the legacy /api/system/kanban
+            // endpoint. The Kanban module renders its own content via
+            // /api/kanban/board on first subtab activation.
+            if (subtabName === 'kanban') {
+                return;
+            }
+
             // Load diagram if not loaded
             if (!targetPanel.hasAttribute('data-loaded')) {
                 loadDiagram(subtabName);
@@ -1711,7 +1721,12 @@ document.addEventListener('DOMContentLoaded', () => {
         ];
 
         function escapeHtml(s) {
-            return s
+            // ARCH-DA5B0A2D (A4): tolerate null/undefined. The kanban API
+            // legitimately returns title=null for cards migrated from the
+            // legacy vault that lacked a frontmatter title — a TypeError
+            // here was killing the entire board render.
+            if (s === null || s === undefined) return '';
+            return String(s)
                 .replace(/&/g, '&amp;')
                 .replace(/</g, '&lt;')
                 .replace(/>/g, '&gt;');
@@ -1821,6 +1836,18 @@ document.addEventListener('DOMContentLoaded', () => {
         const CANONICAL_COLUMNS = ['backlog', 'proposal', 'beta testing', 'alpha polish', 'finalized', 'deployed'];
         const VALID_SUBSTATUSES = ['planning', 'execution.coding', 'execution.testing', 'review', 'blocked'];
 
+        // ARCH-DA5B0A2D (A4): local escapeHtml — the global one defined at
+        // line ~1723 is inside another closure (LMS logs section) and not
+        // reachable from this IIFE. Tolerates null/undefined to handle
+        // migrated cards that lack a frontmatter title.
+        function escapeHtml(s) {
+            if (s === null || s === undefined) return '';
+            return String(s)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;');
+        }
+
         // Error banner helpers
         const errorBanner = document.getElementById('kanban-error-banner');
         const errorMessage = document.getElementById('error-message');
@@ -1896,10 +1923,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 `;
             }
 
+            // Fall back to the proposal id when the title is missing —
+            // happens for cards migrated from the legacy vault that lacked
+            // a frontmatter `title` field. An untitled card is unreadable.
+            const displayTitle = cardData.title || cardData.proposal_id;
+
             card.innerHTML = `
                 <div class="kanban-card-header">
                     <span class="kanban-card-prefix ${prefixClass}">${prefixClass.toUpperCase()}</span>
-                    <span class="kanban-card-title">${escapeHtml(cardData.title)}</span>
+                    <span class="kanban-card-title">${escapeHtml(displayTitle)}</span>
                 </div>
                 <div class="kanban-card-meta">
                     <span class="kanban-card-severity ${severityClass}">
