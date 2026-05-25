@@ -369,6 +369,50 @@ Prior Record Hash: {prior_hash or 'N/A'}
         finally:
             conn.close()
 
+    def log_approval(
+        self,
+        proposal_id: str,
+        phase: str,
+        status: str,
+        approver: str,
+        reason: Optional[str] = None,
+        decision_log_path: Optional[str] = None,
+    ) -> int:
+        """
+        Log a generic approval/audit event to the approval_log table.
+
+        Used by KanbanProcessor._audit_log_block to record blocked
+        transitions and other audit events. The richer ``phase``,
+        ``reason``, ``decision_log_path`` fields are encoded into the
+        ``decision`` column as a compact string so the existing schema is
+        not altered (the table is shared with Gate #3 queries).
+
+        Returns the row id of the new entry, or -1 if the insert failed.
+        """
+        # The approval_log table holds (proposal_id, role, decision, approver, ts).
+        # We map the richer audit fields into ``role`` (the phase that the
+        # event refers to) and ``decision`` (status + reason summary).
+        composed_decision = status
+        if reason:
+            composed_decision = f"{status}: {reason}"
+        if decision_log_path:
+            composed_decision = f"{composed_decision} | log: {decision_log_path}"
+
+        conn = sqlite3.connect(str(self.db_path))
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                INSERT INTO approval_log (proposal_id, role, decision, approver, ts)
+                VALUES (?, ?, ?, ?, datetime('now'))
+                """,
+                (proposal_id, phase, composed_decision, approver),
+            )
+            conn.commit()
+            return cursor.lastrowid or -1
+        finally:
+            conn.close()
+
 
 def verify_approval_logs_integrity(logger: Optional[ApprovalLogger] = None) -> Dict[str, bool]:
     """
