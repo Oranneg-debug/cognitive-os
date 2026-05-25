@@ -73,8 +73,14 @@ logger = logging.getLogger(__name__)
 
 #: Hard timeout on a single LLM call. The planner may issue up to two
 #: calls (initial + one retry), so worst-case wall time is ~2×TIMEOUT.
-#: 60s matches Specialist amendment A2 from the boardroom verdict.
-LLM_TIMEOUT_SECONDS: float = 60.0
+#:
+#: Originally 60s per Specialist amendment A2 from the boardroom
+#: verdict. Bumped to 180s on 2026-05-25 after observing ministral-3-3b
+#: timing out on the dashboard-migration handoff (~600 lines of
+#: verdict + proposal body). The intent of the timeout is a safety
+#: net against true hangs, not a performance target — 180s still
+#: bounds worst-case planner cost at ~6 min (initial + retry).
+LLM_TIMEOUT_SECONDS: float = 180.0
 
 #: Where dead-letters land when the LLM emits invalid output twice. We
 #: mirror ``api.py``'s convention rather than introducing a new const.

@@ -62,3 +62,7 @@ dev/.cline_rejected_phase5/
 # Boardroom scratch artefacts (verdict captures from /process responses)
 scripts/.boardroom_*
 
+
+# Handoff backups produced by scripts/replan_existing_handoffs.py --apply
+dev/handoffs/*.bak.*.md
+

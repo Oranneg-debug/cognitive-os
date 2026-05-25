@@ -576,15 +576,22 @@ roles:
     # `_PLANNER_SYSTEM_PROMPT` in src/handoff_planner.py (kept as code,
     # not config, because it contains worked markdown examples that are
     # painful to wrangle inside a YAML string).
-    model: ministral-3-3b-instruct-2512
+    #
+    # Model swap 2026-05-25 (post-finalization): ministral-3-3b emitted
+    # invalid JSON twice + timed out on the dashboard-migration handoff
+    # (~600 lines of input). Swapped to deepseek-coder-v2-lite-instruct:
+    # MoE 16B/2.4B-active, trained on structured-output tasks, higher
+    # JSON-schema fidelity at low temp. Swap path documented in
+    # docs/HANDOFF_PLANNER_OUTPUT_SPEC.md §6.
+    model: deepseek-coder-v2-lite-instruct
     compass_weight: IGNORE
     system_prompt: "See _PLANNER_SYSTEM_PROMPT in src/handoff_planner.py — kept as Python module constant for legibility."
-    temperature: 0.3
+    temperature: 0.2
     top_p: 0.9
     top_k: 40
     min_p: 0.1
     max_tokens: 8192
-    context_window: 131072
+    context_window: 65536
     gpu_layers: -1
     n_parallel: 1
     enabled: true
