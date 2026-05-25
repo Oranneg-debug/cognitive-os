@@ -23,6 +23,7 @@ from src.paths import (
 
 # Governance Foundation imports
 from src.workflow_models import ValidatedProposal, Severity, WorkflowPhase
+from src.kanban_store import KanbanStore
 from src.schema_validator import validate_proposal_yaml, SchemaValidationError
 from src.handoff_vault import HandoffVault
 from src.approval_logger import ApprovalLogger
@@ -188,6 +189,9 @@ class ProposalWriter:
         # Auto-add card to Kanban Board in vault (OUTSIDE UoW per A4 design)
         self._add_card_to_kanban(proposal_id, card_title, kanban_card_id, source_note=source_note)
 
+        # Add card to SQLite kanban store for dashboard
+        self._add_card_to_store(proposal_id, prefix, card_title, origin)
+
         proposal_data = {
             "proposal_id": proposal_id,
             "kanban_card_id": kanban_card_id,
@@ -299,6 +303,52 @@ class ProposalWriter:
 
         except Exception as e:
             print(f"Warning: Could not update Kanban board: {e}")
+            return False
+
+    def _add_card_to_store(
+        self,
+        proposal_id: str,
+        prefix: str,
+        title: str,
+        origin: str
+    ) -> bool:
+        """
+        Add a new proposal card to the SQLite kanban store (for dashboard).
+
+        Args:
+            proposal_id: The ID of the proposal (e.g., DEV-20260525-123456-ABCD1234)
+            prefix: The prefix (DEV, ARCH, NLST)
+            title: Short title for the card
+            origin: Where the proposal came from (telegram, obsidian, etc.)
+
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            import asyncio
+            
+            kanban_store = KanbanStore()
+            
+            # Run the async add_card method from sync context
+            asyncio.run(kanban_store.add_card(
+                proposal_id=proposal_id,
+                prefix=prefix,
+                column_name="Backlog",
+                title=title or None,
+                substatus=None,
+                severity="BACKLOG",
+                origin=origin or "unknown",
+                approver="system",
+                reason="Proposal created"
+            ))
+            
+            print(f"✅ Added {proposal_id} to dashboard kanban store")
+            return True
+
+        except Exception as e:
+            print(f"⚠️ Warning: Could not add card to dashboard kanban store: {e}")
+            import traceback
+            traceback.print_exc()
             return False
 
     def _get_kanban_template(self) -> str:
