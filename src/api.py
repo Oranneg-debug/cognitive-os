@@ -711,26 +711,46 @@ def process_prompt(request: PromptRequest):
             is_pdf=request.is_pdf,
             source_file_path=request.source_file_path
         )
-        
-        # 2. Route synthesis via OutputRouter (A1: replace inline string-matching)
-        decision = output_router.route(result)
-        path = output_router.apply(result, decision)
-        
+
+        # 2. Persist synthesis via OutputRouter.
+        #
+        # Heterogeneous return contract from orchestrator.process_request:
+        #  - Boardroom / oracle / technical / design meetings: orchestrator
+        #    already routed via the injected OutputRouter (see
+        #    _execute_orchestrated_meeting), so `result` is a Path.
+        #  - Simple / standard / vision / nft / dev_lifecycle: orchestrator
+        #    returns a str. Route it here.
+        #
+        # Calling output_router.route() on a Path crashes (Path has no
+        # splitlines). Branch on type to avoid the double-route regression.
+        if isinstance(result, Path):
+            path = result
+            decision = None
+            response_payload = str(result)
+        else:
+            decision = output_router.route(result)
+            path = output_router.apply(result, decision)
+            response_payload = result
+
         # 3. Get task_id for the response
         task_id = orchestrator.memory.generate_task_id(request.prompt)
 
         return {
             "status": "success",
-            "routing_decision": {
-                "rule_name": decision.rule_name,
-                "destination": decision.destination,
-                "workflow_phase": decision.workflow_phase,
-                "severity": decision.severity,
-                "matched_markers": decision.matched_markers
-            },
+            "routing_decision": (
+                {
+                    "rule_name": decision.rule_name,
+                    "destination": decision.destination,
+                    "workflow_phase": decision.workflow_phase,
+                    "severity": decision.severity,
+                    "matched_markers": decision.matched_markers,
+                }
+                if decision is not None
+                else {"rule_name": "orchestrator_routed", "destination": None}
+            ),
             "saved_path": str(path),
             "task_id": task_id,
-            "response": result,
+            "response": response_payload,
             "oversight": orchestrator.memory.get_task_data(task_id).get("oversight_analysis", {}).get("raw_analysis", "")
         }
         
