@@ -449,6 +449,17 @@ class HandoffPlanner:
         if first_brace > 0 and last_brace > first_brace:
             cleaned = cleaned[first_brace : last_brace + 1]
 
+        # Defensively repair bare backslashes that ministral-3-3b
+        # sometimes emits inside string values. ``json.loads`` rejects
+        # ``"\\X"`` for any X not in {"\\", "/", "b", "f", "n", "r", "t",
+        # "u", `"`}. The model especially likes prepending ``\`` to
+        # word chars when quoting CLI-ish snippets in subtasks.
+        # We rewrite ``\X`` → ``\\X`` for those bad X, leaving valid
+        # JSON escapes alone. This is best-effort: if the model emits
+        # genuinely broken JSON elsewhere, validation will still fail
+        # and the retry will fire.
+        cleaned = _repair_bare_backslashes(cleaned)
+
         data = json.loads(cleaned)
 
         # Allow the LLM to omit proposal_id (we always know it) — inject
@@ -508,3 +519,47 @@ def _peel_outer_fence(text: str) -> str:
     if match:
         return match.group(1)
     return text
+
+
+# JSON spec: a backslash may be followed by ONE of: " \ / b f n r t
+# (literal escape chars) or u + 4 hex digits.
+# This regex matches a backslash that is NOT part of a valid escape.
+# Greedy alternation: match ``\\`` as a pair first (so its second
+# backslash isn't seen as a stray); same for other valid escapes.
+# What's LEFT over after the alternation is by definition invalid.
+_VALID_ESCAPE_RE: re.Pattern[str] = re.compile(
+    r'\\(?:["\\/bfnrt]|u[0-9a-fA-F]{4})'
+)
+
+
+def _repair_bare_backslashes(text: str) -> str:
+    """Escape bare backslashes that would break ``json.loads``.
+
+    Rewrites ``\\X`` to ``\\\\X`` for any X that's not a valid JSON
+    escape. Conservative: walks the string once, recognises valid
+    escapes as pairs, and only doubles standalone backslashes.
+
+    Background: ``ministral-3-3b`` (the default planner model) often
+    emits things like ``"import \\W from foo"`` inside subtasks. The
+    proper fix is at prompt level, but defensive parsing here pays
+    off in practice and is easy to remove if the model behaviour
+    improves.
+    """
+    out: list[str] = []
+    i = 0
+    while i < len(text):
+        ch = text[i]
+        if ch != "\\":
+            out.append(ch)
+            i += 1
+            continue
+        # We have a backslash. Try to match a valid escape starting here.
+        m = _VALID_ESCAPE_RE.match(text, i)
+        if m:
+            out.append(m.group(0))
+            i = m.end()
+        else:
+            # Bare backslash → double it
+            out.append("\\\\")
+            i += 1
+    return "".join(out)

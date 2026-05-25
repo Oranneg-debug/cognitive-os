@@ -497,3 +497,53 @@ def test_system_prompt_forbids_prose_and_fences():
     prompt = planner_mod._PLANNER_SYSTEM_PROMPT
     assert re.search(r"no\s+(?:prose|fences)", prompt, re.IGNORECASE)
     assert "ONLY" in prompt  # "Return ONLY the JSON"
+
+
+# ════════════════════════════════════════════════════════════════════
+#  Defensive parsing — repair of bad LLM output (observed in the wild)
+# ════════════════════════════════════════════════════════════════════
+
+
+def test_planner_repairs_bare_backslashes_in_llm_output():
+    """A24 (parsing). Real-world ministral-3-3b output observed during
+    the first replan_existing_handoffs run on 2026-05-25 emitted
+    ``"import \\W from foo"`` inside subtasks. ``json.loads`` chokes on
+    that (``\\W`` is not a valid JSON escape). ``_repair_bare_backslashes``
+    rewrites it so the response still parses.
+    """
+    # Build a response with a bare backslash that would normally trip json.loads
+    raw_with_bad_escape = (
+        '{"proposal_id": "ARCH-X", "sections": [{"name":"S","tasks":['
+        '{"id":"A1","title":"x","acceptance":"import \\W from foo",'
+        '"subtasks":[],"constraints":[],"file_paths":[]}'
+        "]}]}"
+    )
+    # Sanity: confirm raw is indeed invalid JSON before the repair
+    try:
+        json.loads(raw_with_bad_escape)
+        pytest.fail("test premise wrong: raw was actually valid JSON")
+    except json.JSONDecodeError:
+        pass
+
+    p = HandoffPlanner(
+        llm_client=FakeLLM([raw_with_bad_escape]),
+        role_config_loader=_fake_role_loader,
+    )
+    plan = p.plan("ARCH-X", "body", "verdict", [])
+    # The escaped backslash survives into the validated field
+    assert "\\W" in plan.sections[0].tasks[0].acceptance
+
+
+def test_repair_helper_leaves_valid_escapes_alone():
+    """A25 (parsing). ``_repair_bare_backslashes`` must not break legitimate
+    JSON escapes; only the genuinely bad ones get fixed."""
+    from src.handoff_planner import _repair_bare_backslashes
+
+    # All these are valid JSON escapes — must pass through unchanged
+    good = r'"a\n b\t c\u00ff d\" e\\ f\/g\b h\f i\r"'
+    assert _repair_bare_backslashes(good) == good
+
+    # And these get doubled
+    bad_in = r'"a\W b\x"'
+    bad_out = _repair_bare_backslashes(bad_in)
+    assert bad_out == r'"a\\W b\\x"'
