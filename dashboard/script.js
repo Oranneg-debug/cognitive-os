@@ -4,9 +4,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const configTitle = document.getElementById('config-title');
     const configPanel = document.getElementById('config-panel');
     const saveBtn = document.getElementById('save-btn');
-    const testPromptInput = document.getElementById('test-prompt-input');
-    const testBtn = document.getElementById('test-btn');
-    const orchestrationSelect = document.getElementById('orchestration-select');
     const tabs = document.querySelectorAll('.tab-link');
 
     // ---- Orchestrations catalog (single source of truth for sidebar + cards) ----
@@ -36,7 +33,7 @@ document.addEventListener('DOMContentLoaded', () => {
           desc: 'Metadata generation + minting simulation.',
           target: 'nft_specialist' },
         { cmd: '/dev',       emoji: '🧪', name: 'Dev Lifecycle',
-          desc: 'Creates a proposal and pushes a card to Backlog. The Kanban watcher takes it from there.',
+          desc: 'Creates a proposal in SQLite-backed kanban store (Backlog column). Use #dev in chatbox for proper workflow.',
           target: 'DevRouteManager' },
     ];
 
@@ -46,6 +43,199 @@ document.addEventListener('DOMContentLoaded', () => {
     let hasChanges = false;
     let systemLoadInterval = null;
     let recentOrchestrations = []; // Store recent runs
+    let chatHistory = []; // Store conversation history for role chat
+    let currentChatRole = null; // Currently selected role for chat
+
+    // --- Unified Chatbox Functionality ---
+    const chatModeRadios = document.querySelectorAll('input[name="chat-mode"]');
+    const chatRoleSelector = document.getElementById('chat-role-selector');
+    const chatRoleSelect = document.getElementById('chat-role-select');
+    const chatInput = document.getElementById('chat-input');
+    const chatSendBtn = document.getElementById('chat-send-btn');
+    const chatThread = document.getElementById('chat-thread');
+
+    // Mode switching
+    chatModeRadios.forEach(radio => {
+        radio.addEventListener('change', (e) => {
+            const mode = e.target.value;
+            if (mode === 'role') {
+                chatRoleSelector.style.display = 'block';
+                chatInput.placeholder = 'Chat with the selected role...';
+                populateChatRoles();
+            } else {
+                chatRoleSelector.style.display = 'none';
+                chatInput.placeholder = 'Type your message or orchestration command (e.g., #dev Create a new feature for X...)';
+                chatHistory = []; // Clear history when switching to orchestration mode
+            }
+        });
+    });
+
+    // Role selection change
+    chatRoleSelect.addEventListener('change', (e) => {
+        currentChatRole = e.target.value;
+        chatHistory = []; // Clear history when switching roles
+        clearChatThread();
+    });
+
+    // Populate role dropdown
+    function populateChatRoles() {
+        if (Object.keys(fullConfig.roles || {}).length === 0) return;
+        
+        const roles = Object.keys(fullConfig.roles).sort();
+        chatRoleSelect.innerHTML = '<option value="">-- Select a role --</option>' +
+            roles.map(r => `<option value="${r}">${r}</option>`).join('');
+    }
+
+    // Send chat message
+    chatSendBtn.addEventListener('click', async () => {
+        const message = chatInput.value.trim();
+        if (!message) return;
+
+        const mode = document.querySelector('input[name="chat-mode"]:checked').value;
+        
+        if (mode === 'orchestration') {
+            await sendOrchestrationMessage(message);
+        } else {
+            if (!currentChatRole) {
+                appendChatMessage('system', 'Please select a role first.');
+                return;
+            }
+            await sendRoleChatMessage(message);
+        }
+        
+        chatInput.value = '';
+    });
+
+    // Handle Enter key (Shift+Enter for newline)
+    chatInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            chatSendBtn.click();
+        }
+    });
+
+    // Send orchestration message
+    async function sendOrchestrationMessage(message) {
+        appendChatMessage('user', message);
+        appendChatMessage('system', '🎼 Processing orchestration...');
+        
+        try {
+            const response = await fetch('/api/process', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ prompt: message })
+            });
+            
+            const data = await response.json();
+            
+            // Remove processing message
+            const lastMsg = chatThread.lastElementChild;
+            if (lastMsg && lastMsg.classList.contains('chat-system')) {
+                lastMsg.remove();
+            }
+            
+            if (data.status === 'success') {
+                appendChatMessage('assistant', data.response || 'Orchestration completed.');
+                if (data.kanban_card_id) {
+                    appendChatMessage('system', `✅ Created kanban card: ${data.kanban_card_id}`);
+                }
+            } else {
+                appendChatMessage('error', data.error || 'Orchestration failed.');
+            }
+        } catch (err) {
+            const lastMsg = chatThread.lastElementChild;
+            if (lastMsg && lastMsg.classList.contains('chat-system')) {
+                lastMsg.remove();
+            }
+            appendChatMessage('error', `Error: ${err.message}`);
+        }
+    }
+
+    // Send role chat message
+    async function sendRoleChatMessage(message) {
+        appendChatMessage('user', message);
+        appendChatMessage('system', '💭 Thinking...');
+        
+        try {
+            const response = await fetch('/api/chat/role', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                    role: currentChatRole,
+                    message: message,
+                    history: chatHistory
+                })
+            });
+            
+            const data = await response.json();
+            
+            // Remove thinking message
+            const lastMsg = chatThread.lastElementChild;
+            if (lastMsg && lastMsg.classList.contains('chat-system')) {
+                lastMsg.remove();
+            }
+            
+            if (data.response) {
+                appendChatMessage('assistant', data.response);
+                chatHistory = data.history || [...chatHistory, 
+                    { role: 'user', content: message },
+                    { role: 'assistant', content: data.response }
+                ];
+            } else {
+                appendChatMessage('error', data.error || 'No response from role.');
+            }
+        } catch (err) {
+            const lastMsg = chatThread.lastElementChild;
+            if (lastMsg && lastMsg.classList.contains('chat-system')) {
+                lastMsg.remove();
+            }
+            appendChatMessage('error', `Error: ${err.message}`);
+        }
+    }
+
+    // Append message to chat thread
+    function appendChatMessage(type, content) {
+        // Remove placeholder if present
+        const placeholder = chatThread.querySelector('.placeholder');
+        if (placeholder) placeholder.remove();
+        
+        const msgDiv = document.createElement('div');
+        msgDiv.className = `chat-message chat-${type}`;
+        
+        const timestamp = new Date().toLocaleTimeString('en-US', { 
+            hour: '2-digit', 
+            minute: '2-digit' 
+        });
+        
+        let icon = '';
+        if (type === 'user') icon = '👤';
+        else if (type === 'assistant') icon = '🤖';
+        else if (type === 'system') icon = 'ℹ️';
+        else if (type === 'error') icon = '⚠️';
+        
+        msgDiv.innerHTML = `
+            <div class="chat-message-header">
+                <span class="chat-message-icon">${icon}</span>
+                <span class="chat-message-time">${timestamp}</span>
+            </div>
+            <div class="chat-message-content">${escapeHtml(content)}</div>
+        `;
+        
+        chatThread.appendChild(msgDiv);
+        chatThread.scrollTop = chatThread.scrollHeight;
+    }
+
+    // Clear chat thread
+    function clearChatThread() {
+        chatThread.innerHTML = '<p class="placeholder">Your conversation will appear here</p>';
+    }
+
+    // HTML escape helper
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML.replace(/\n/g, '<br>');
+    }
 
     // --- Data Fetching and Initialization ---
 
@@ -884,32 +1074,6 @@ document.addEventListener('DOMContentLoaded', () => {
         return result;
     }
 
-    async function handleTestClick() {
-        const prompt = testPromptInput.value;
-        if (!prompt) {
-            alert('Please enter a test prompt.');
-            return;
-        }
-        const cmd = orchestrationSelect ? orchestrationSelect.value : '/simple';
-        testBtn.disabled = true;
-        testBtn.textContent = 'Running…';
-        try {
-            const result = await runOrchestration(cmd, prompt);
-            alert(
-                `Pattern: ${result.pattern || cmd}\n` +
-                `Task: ${result.task_id || '—'}\n\n` +
-                `${(result.response || '').slice(0, 1200)}` +
-                ((result.response || '').length > 1200 ? '\n\n…(truncated, see terminal)' : '')
-            );
-        } catch (error) {
-            console.error('Error running orchestration:', error);
-            alert(`Error: ${error.message}`);
-        } finally {
-            testBtn.disabled = false;
-            testBtn.textContent = 'Run Orchestration';
-        }
-    }
-
     // ---- Orchestrations tab ----
     function renderOrchestrationCards() {
         const grid = document.getElementById('orch-grid');
@@ -1008,7 +1172,6 @@ document.addEventListener('DOMContentLoaded', () => {
     rolesList.addEventListener('click', handleSidebarClick);
     modelsList.addEventListener('click', handleSidebarClick);
     saveBtn.addEventListener('click', handleSaveClick);
-    testBtn.addEventListener('click', handleTestClick);
     tabs.forEach(tab => tab.addEventListener('click', handleTabClick));
     
     // Load Obsidian Preset button

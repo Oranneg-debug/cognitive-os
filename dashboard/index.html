@@ -23,22 +23,7 @@
                     <!-- Models will be dynamically inserted here -->
                 </ul>
             </nav>
-            <div class="test-panel">
-                <select id="orchestration-select" class="orchestration-select" title="Select orchestration pattern">
-                    <option value="auto">Auto (Sentry routes)</option>
-                    <option value="/simple">⚡ Simple — single pass</option>
-                    <option value="/standard">📋 Standard — single + preset</option>
-                    <option value="/vision">👁 Vision — image-aware single pass</option>
-                    <option value="/technical">🔧 Technical Meeting</option>
-                    <option value="/design">🎨 Design Meeting</option>
-                    <option value="/boardroom">🏛 Sequential Boardroom</option>
-                    <option value="/oracle">🔮 Oracle Council</option>
-                    <option value="/nft">💎 NFT Creation</option>
-                    <option value="/dev">🧪 Dev Team (creates proposal)</option>
-                </select>
-                <input type="text" id="test-prompt-input" placeholder="Prompt for the selected orchestration…">
-                <button id="test-btn" class="test-btn">Run Orchestration</button>
-            </div>
+            <!-- Test panel removed - use unified chatbox on Homepage instead -->
         </aside>
         <main class="main-content">
             <header>
@@ -131,6 +116,43 @@
                             <p class="placeholder">No recent activity</p>
                         </div>
                     </div>
+                    
+                    <!-- Unified Chatbox -->
+                    <div class="unified-chatbox">
+                        <h2>💬 Cognitive OS Chat</h2>
+                        <p class="chatbox-subtitle">
+                            Send orchestrations (#dev, #technical, #boardroom) or chat directly with any role.
+                        </p>
+                        
+                        <div class="chat-mode-selector">
+                            <label>
+                                <input type="radio" name="chat-mode" value="orchestration" checked>
+                                <span>🎼 Orchestration</span>
+                            </label>
+                            <label>
+                                <input type="radio" name="chat-mode" value="role">
+                                <span>🤖 Direct Role Chat</span>
+                            </label>
+                        </div>
+                        
+                        <div id="chat-role-selector" class="chat-role-selector" style="display: none;">
+                            <label>Role:
+                                <select id="chat-role-select">
+                                    <option value="">Loading roles...</option>
+                                </select>
+                            </label>
+                        </div>
+                        
+                        <div class="chat-input-area">
+                            <textarea id="chat-input" rows="3" 
+                                placeholder="Type your message or orchestration command (e.g., #dev Create a new feature for X...)"></textarea>
+                            <button id="chat-send-btn" class="chat-send-btn">Send</button>
+                        </div>
+                        
+                        <div id="chat-thread" class="chat-thread">
+                            <p class="placeholder">Your conversation will appear here</p>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -149,11 +171,10 @@
 
             <div id="orchestrations" class="tab-content">
                 <div class="orchestrations-page">
-                    <h1>🎼 Orchestrations</h1>
+                    <h1>🎼 Orchestrations (Legacy)</h1>
                     <p class="orch-subtitle">
-                        Pick a pattern, type a prompt, watch the council run. Each card sends a prefixed
-                        request to <code>/process</code> — the Sentry Router still validates, but the
-                        prefix forces the pattern.
+                        <strong>⚠️ This page is being deprecated.</strong> Use the unified chatbox on the Homepage instead for orchestrations and direct role conversations.<br>
+                        This page remains for reference and specialized testing.
                     </p>
 
                     <div class="orch-layout">

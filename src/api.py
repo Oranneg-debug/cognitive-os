@@ -795,6 +795,92 @@ def process_prompt(request: PromptRequest):
         }
 
 # ============================================================================
+# Direct Role Chat API Endpoint (Dashboard Unified Chatbox)
+# ============================================================================
+
+class RoleChatRequest(BaseModel):
+    role: str
+    message: str
+    history: list = []
+
+@app.post("/api/chat/role")
+def chat_with_role(request: RoleChatRequest):
+    """
+    Direct conversation with a specific role, maintaining multi-turn history.
+    
+    Args:
+        role: Name of the role to chat with
+        message: User's message
+        history: Previous conversation history [{"role": "user"|"assistant", "content": "..."}]
+    
+    Returns:
+        response: Role's response
+        history: Updated conversation history
+    """
+    try:
+        # Build conversation context from history
+        conversation_context = []
+        for msg in request.history:
+            conversation_context.append(f"{msg.get('role', 'unknown')}: {msg.get('content', '')}")
+        
+        # Append current message
+        full_prompt = request.message
+        if conversation_context:
+            context_str = "\n".join(conversation_context)
+            full_prompt = f"Previous conversation:\n{context_str}\n\nUser: {request.message}"
+        
+        # Get role configuration
+        config_path = Path(__file__).resolve().parent.parent / "dev" / "master_config.md"
+        with open(config_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        
+        # Extract YAML config
+        import yaml
+        yaml_match = re.search(r'```yaml\s*(.*?)\s*```', content, re.DOTALL)
+        if not yaml_match:
+            raise ValueError("Could not extract YAML from master_config.md")
+        
+        config = yaml.safe_load(yaml_match.group(1))
+        
+        if request.role not in config.get('roles', {}):
+            raise HTTPException(status_code=404, detail=f"Role '{request.role}' not found in configuration")
+        
+        role_config = config['roles'][request.role]
+        
+        # Send to LLM using the orchestrator's LLM client
+        from src.llm_client import LLMClient
+        llm_client = LLMClient(config)
+        
+        response_text = llm_client.send_request(
+            role=request.role,
+            prompt=full_prompt,
+            system_prompt=role_config.get('system_prompt', ''),
+            temperature=role_config.get('temperature', 0.7)
+        )
+        
+        # Update history
+        updated_history = request.history + [
+            {"role": "user", "content": request.message},
+            {"role": "assistant", "content": response_text}
+        ]
+        
+        return {
+            "response": response_text,
+            "history": updated_history
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        error_trace = traceback.format_exc()
+        print(f"\n🚨 ERROR IN /CHAT/ROLE ENDPOINT 🚨\n{error_trace}\n")
+        return {
+            "error": f"Error communicating with role: {str(e)}",
+            "response": None
+        }
+
+# ============================================================================
 # Proposal Sync API Endpoints (DEV-20260521-001000-B5D5C0DE)
 # ============================================================================
 
