@@ -1500,7 +1500,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 'Top K': modelConfig.top_k || '40',
                 'Max Tokens': modelConfig.max_tokens || '2048',
                 'Batch Size': modelConfig.batch_size || '512',
-                'N-Parallel': model.n_parallel || modelConfig.n_parallel || '1',
+                'N-Parallel': modelConfig.n_parallel || modelConfig.n_parallel || '1',
                 'GPU Layers': modelConfig.gpu_layers || '-1',
                 'K-Cache Quant': modelConfig.k_cache_quant || 'q8_0',
                 'V-Cache Quant': modelConfig.v_cache_quant || 'q8_0',
@@ -2022,23 +2022,7 @@ document.addEventListener('DOMContentLoaded', () => {
             // (see DEV-B5D5C0DE.alpha_polish_patches). The renderer + API
             // already accept substatus on any column.
             const SUBSTATUS_COLUMNS = ['beta testing', 'alpha polish'];
-            let substatusHtml = '';
-            if (SUBSTATUS_COLUMNS.includes(cardData.column_name)) {
-                const currentSubstatus = cardData.substatus || 'planning';
-                // data-column carries the card's *current* column so the
-                // substatus handler can keep it in place. Without this the
-                // handler used to hard-code target_column='beta testing',
-                // silently moving alpha-polish cards into beta on every
-                // substatus change.
-                substatusHtml = `
-                    <div class="kanban-card-substatus">
-                        <label>Substatus</label>
-                        <select class="beta-substatus" data-proposal-id="${cardData.proposal_id}" data-prev-value="${currentSubstatus}" data-column="${cardData.column_name}">
-                            ${VALID_SUBSTATUSES.map(s => `<option value="${s}" ${currentSubstatus === s ? 'selected' : ''}>${formatSubstatus(s)}</option>`).join('')}
-                        </select>
-                    </div>
-                `;
-            }
+            // substatusWidget is a DOM node built later via buildSubstatusWidget.
 
             // Fall back to the proposal id when the title is missing —
             // happens for cards migrated from the legacy vault that lacked
@@ -2061,18 +2045,34 @@ document.addEventListener('DOMContentLoaded', () => {
                     </span>
                 </div>
                 <div class="kanban-card-id" title="Click card to copy this id">${escapeHtml(shortId)}</div>
-                ${substatusHtml}
             `;
+
+            // Append substatus widget as real DOM node (preserves listeners)
+            if (SUBSTATUS_COLUMNS.includes(cardData.column_name)) {
+                card.appendChild(buildSubstatusWidget(cardData));
+            }
+
+            // Proposal column: show council verdict badge so user knows
+            // whether to drag forward or move back to backlog for rework.
+            if (cardData.column_name === 'proposal' && cardData.substatus) {
+                card.appendChild(buildVerdictBadge(cardData.substatus));
+            }
+
+            // Backlog column: show any non-null substatus (e.g. "rejected"
+            // persists after a failed council so rework cards are visible).
+            if (cardData.column_name === 'backlog' && cardData.substatus) {
+                card.appendChild(buildVerdictBadge(cardData.substatus));
+            }
 
             // Drag events
             card.addEventListener('dragstart', handleDragStart);
             card.addEventListener('dragend', handleDragEnd);
 
-            // Click to show history, EXCEPT:
-            //  - clicks on the substatus dropdown (own handler)
-            //  - clicks on the proposal-id badge (copy to clipboard instead)
+            // Click to show history, EXCEPT clicks on substatus controls
+            // and the proposal-id badge (copy to clipboard).
             card.addEventListener('click', (e) => {
-                if (e.target.classList.contains('beta-substatus')) return;
+                if (e.target.closest('.kanban-card-substatus')) return;
+                if (e.target.closest('.kanban-verdict-wrap')) return; // DO NOT OPEN HISTORY IF CLICKING VERDICT
                 if (e.target.classList.contains('kanban-card-id')) {
                     navigator.clipboard.writeText(cardData.proposal_id).then(() => {
                         const el = e.target;
@@ -2088,15 +2088,233 @@ document.addEventListener('DOMContentLoaded', () => {
             return card;
         }
 
-        function formatSubstatus(s) {
-            const map = {
-                'planning': 'Planning',
-                'execution.coding': 'Coding',
-                'execution.testing': 'Testing',
-                'review': 'Review',
-                'blocked': 'Blocked'
+        // ── Substatus state machine ────────────────────────────────────────
+        // Each state carries: label, badge colour, the single forward
+        // action (next + tooltip), and optional secondary actions.
+        const SUBSTATUS_MACHINE = {
+            'planning': {
+                label: 'Planning',
+                color: '#4a7eb5',
+                forward: { next: 'execution.coding', btn: '▶ Start Coding', tip: 'Implementation started — begin writing code' },
+                secondary: []
+            },
+            'execution.coding': {
+                label: 'Coding',
+                color: '#d9a84a',
+                forward: { next: 'execution.debugging', btn: '▶ Debug', tip: 'Code written — run tests and fix failures' },
+                secondary: []
+            },
+            'execution.debugging': {
+                label: 'Debugging',
+                color: '#d96a4a',
+                forward: { next: 'execution.testing', btn: '▶ Start Testing', tip: 'Bugs resolved — begin formal QA testing' },
+                secondary: []
+            },
+            'execution.testing': {
+                label: 'Testing',
+                color: '#9a4ad9',
+                forward: { next: 'execution.ready-for-alpha', btn: '✓ Mark Ready', tip: 'All tests pass — ready to move to next column' },
+                secondary: []
+            },
+            'execution.ready-for-alpha': {
+                label: 'Ready ✓',
+                color: '#4ad98a',
+                forward: null,  // no advance btn — drag the card
+                secondary: []
+            },
+            'blocked': {
+                label: 'Blocked',
+                color: '#d94a4a',
+                forward: null,  // resolved via Unblock
+                secondary: []
+            },
+            'review': {
+                label: 'Review',
+                color: '#c4b84a',
+                forward: null,  // resolved via Resume
+                secondary: []
+            },
+        };
+
+        // Returns the DOM node for the substatus section of a card.
+        function buildSubstatusWidget(cardData) {
+            const wrap = document.createElement('div');
+            wrap.className = 'kanban-card-substatus';
+            const s = cardData.substatus || 'planning';
+            const col = cardData.column_name;
+
+            const state = SUBSTATUS_MACHINE[s] || { label: s, color: '#666', forward: null, secondary: [] };
+
+            // Badge
+            const badge = document.createElement('span');
+            badge.className = 'substatus-badge';
+            badge.textContent = state.label;
+            badge.style.setProperty('--substatus-color', state.color);
+            
+            // Add click-to-view for substatus badges too (Beta/Alpha handoffs)
+            badge.title = "Click to view Handoff Document";
+            badge.style.cursor = 'pointer';
+            const openSubstatusDoc = (e) => {
+                const cardEl = e.target.closest('.kanban-card');
+                if (cardEl && cardEl.dataset.proposalId) {
+                    e.stopPropagation();
+                    viewDocument(cardEl.dataset.proposalId, cardEl.dataset.columnId || col);
+                }
             };
-            return map[s] || s;
+            badge.addEventListener('click', openSubstatusDoc);
+            wrap.title = "Click to view Handoff Document";
+            wrap.style.cursor = 'pointer';
+            wrap.addEventListener('click', openSubstatusDoc);
+
+            wrap.appendChild(badge);
+
+            // Forward action button
+            if (state.forward) {
+                const btn = document.createElement('button');
+                btn.className = 'substatus-btn substatus-btn-forward system-button';
+                btn.textContent = state.forward.btn;
+                btn.title = state.forward.tip;
+                btn.dataset.proposalId = cardData.proposal_id;
+                btn.dataset.column = col;
+                btn.dataset.next = state.forward.next;
+                btn.addEventListener('click', handleSubstatusAdvance);
+                
+                // Explicitly add styling to override any generic button reset
+                btn.style.background = 'var(--bg-dark)';
+                btn.style.border = '1px solid var(--border-color)';
+                btn.style.color = 'var(--text-color)';
+                btn.style.padding = '4px 8px';
+                btn.style.borderRadius = '4px';
+                btn.style.cursor = 'pointer';
+                btn.style.marginTop = '6px';
+                btn.style.width = '100%';
+                
+                wrap.appendChild(btn);
+            } else if (s === 'execution.ready-for-alpha') {
+                const hint = document.createElement('span');
+                hint.className = 'substatus-hint';
+                hint.textContent = '⟶ drag to advance';
+                wrap.appendChild(hint);
+            }
+
+            // Exception buttons: Block / Review / Unblock / Resume
+            const btnRow = document.createElement('div');
+            btnRow.className = 'substatus-btn-row';
+            btnRow.style.display = 'flex';
+            btnRow.style.gap = '6px';
+            btnRow.style.marginTop = '6px';
+
+            // Common style helper for secondary buttons
+            const styleSecondaryBtn = (b) => {
+                b.style.background = 'transparent';
+                b.style.border = '1px solid var(--border-color)';
+                b.style.color = 'var(--text-muted)';
+                b.style.padding = '3px 6px';
+                b.style.borderRadius = '4px';
+                b.style.cursor = 'pointer';
+                b.style.fontSize = '11px';
+                b.style.flex = '1';
+            };
+
+            if (s === 'blocked') {
+                const unblockBtn = document.createElement('button');
+                unblockBtn.className = 'substatus-btn substatus-btn-secondary system-button';
+                unblockBtn.textContent = '↩ Unblock';
+                unblockBtn.title = 'Remove blocked status — resume previous phase';
+                unblockBtn.dataset.proposalId = cardData.proposal_id;
+                unblockBtn.dataset.column = col;
+                unblockBtn.dataset.next = 'execution.coding';  // sensible fallback
+                unblockBtn.addEventListener('click', handleSubstatusAdvance);
+                styleSecondaryBtn(unblockBtn);
+                btnRow.appendChild(unblockBtn);
+            } else if (s === 'review') {
+                const resumeBtn = document.createElement('button');
+                resumeBtn.className = 'substatus-btn substatus-btn-secondary system-button';
+                resumeBtn.textContent = '↩ Resume';
+                resumeBtn.title = 'Review done — return to active work';
+                resumeBtn.dataset.proposalId = cardData.proposal_id;
+                resumeBtn.dataset.column = col;
+                resumeBtn.dataset.next = 'execution.coding';
+                resumeBtn.addEventListener('click', handleSubstatusAdvance);
+                styleSecondaryBtn(resumeBtn);
+                btnRow.appendChild(resumeBtn);
+            } else if (s !== 'execution.ready-for-alpha') {
+                // Block + Review always available in active states
+                const blockBtn = document.createElement('button');
+                blockBtn.className = 'substatus-btn substatus-btn-danger system-button';
+                blockBtn.textContent = '⚠ Block';
+                blockBtn.title = 'Mark as blocked — waiting on external dependency';
+                blockBtn.dataset.proposalId = cardData.proposal_id;
+                blockBtn.dataset.column = col;
+                blockBtn.dataset.next = 'blocked';
+                blockBtn.addEventListener('click', handleSubstatusAdvance);
+                styleSecondaryBtn(blockBtn);
+                blockBtn.style.color = 'var(--lms-log-err)';
+
+                const reviewBtn = document.createElement('button');
+                reviewBtn.className = 'substatus-btn substatus-btn-secondary system-button';
+                reviewBtn.textContent = '👁 Review';
+                reviewBtn.title = 'Flag for human review before proceeding';
+                reviewBtn.dataset.proposalId = cardData.proposal_id;
+                reviewBtn.dataset.column = col;
+                reviewBtn.dataset.next = 'review';
+                reviewBtn.addEventListener('click', handleSubstatusAdvance);
+                styleSecondaryBtn(reviewBtn);
+
+                btnRow.appendChild(blockBtn);
+                btnRow.appendChild(reviewBtn);
+            }
+
+            if (btnRow.children.length) wrap.appendChild(btnRow);
+            return wrap;
+        }
+
+        function formatSubstatus(s) {
+            const state = SUBSTATUS_MACHINE[s];
+            return state ? state.label : s;
+        }
+
+        // Verdict badge for proposal/backlog column cards.
+        // Maps the council verdict substatus → a prominent coloured pill
+        // so the user knows at a glance whether to drag forward or rework.
+        const VERDICT_CONFIG = {
+            'approved':       { label: '✓ APPROVED',       color: '#4ad98a', tip: 'Council approved — drag to Beta Testing' },
+            'auto-approved':  { label: '✓ AUTO-APPROVED',  color: '#4ab5d9', tip: 'Low severity — auto-approved, drag to Beta Testing' },
+            'rejected':       { label: '✗ REJECTED',       color: '#d94a4a', tip: 'Council rejected — edit proposal and move back to Proposal to retry' },
+            'queued_council': { label: '⏸ COUNCIL QUEUE', color: '#888888', tip: 'Waiting in line for the council lock' },
+            'pending_council':{ label: '⏳ COUNCIL RUNNING',color: '#d9c44a', tip: 'Council is deliberating — check FastAPI terminal for progress' },
+            'council_error':  { label: '⚠ ERROR',          color: '#c41e3a', tip: 'Council failed — check FastAPI terminal, then re-drag to Proposal' },
+        };
+
+        function buildVerdictBadge(substatus) {
+            const cfg = VERDICT_CONFIG[substatus] || { label: substatus, color: '#666', tip: substatus };
+            const wrap = document.createElement('div');
+            wrap.className = 'kanban-verdict-wrap';
+            const badge = document.createElement('span');
+            badge.className = 'verdict-badge';
+            badge.textContent = cfg.label;
+            badge.title = cfg.tip + " (Click to view full Proposal & Verdict)";
+            badge.style.setProperty('--verdict-color', cfg.color);
+            badge.style.cursor = 'pointer';
+            // Click badge to view the document!
+            // Bind to 'wrap' as well, since clicking the padding around the text
+            // hits the wrap, not the badge span.
+            wrap.style.cursor = 'pointer';
+            wrap.title = cfg.tip + " (Click to view full Proposal & Verdict)";
+            
+            const openDoc = (e) => {
+                const cardEl = e.target.closest('.kanban-card');
+                if (cardEl && cardEl.dataset.proposalId) {
+                    e.stopPropagation();
+                    viewDocument(cardEl.dataset.proposalId, 'proposal');
+                }
+            };
+            
+            badge.addEventListener('click', openDoc);
+            wrap.addEventListener('click', openDoc);
+            
+            wrap.appendChild(badge);
+            return wrap;
         }
 
         // Global drag state
@@ -2215,13 +2433,26 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 const headerEl = document.createElement('div');
                 headerEl.className = 'kanban-column-header';
+                const COLUMN_DESCRIPTIONS = {
+                    'backlog':    'Ideas & new proposals awaiting review',
+                    'proposal':   'Under council review — severity-dispatched',
+                    'beta testing': 'Active development — coding, debugging, testing',
+                    'alpha polish': 'Hardening — UI/UX, performance, final prep',
+                    'finalized':  'Complete — approved for release',
+                    'deployed':   'Live in production',
+                };
+
                 const h3 = document.createElement('h3');
                 h3.textContent = columnId;
                 const countEl = document.createElement('span');
                 countEl.className = 'kanban-column-count';
                 countEl.textContent = String(columnCards.length);
+                const descEl = document.createElement('p');
+                descEl.className = 'kanban-column-desc';
+                descEl.textContent = COLUMN_DESCRIPTIONS[columnId] || '';
                 headerEl.appendChild(h3);
                 headerEl.appendChild(countEl);
+                headerEl.appendChild(descEl);
 
                 const bodyEl = document.createElement('div');
                 bodyEl.className = 'kanban-column-body';
@@ -2234,10 +2465,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 setupDropZone(colEl);
             });
 
-            // Substatus selects live inside cards — query the live DOM.
-            document.querySelectorAll('.beta-substatus').forEach(select => {
-                select.addEventListener('change', handleSubstatusChange);
-            });
+            // Substatus buttons are attached directly to DOM nodes inside
+            // buildSubstatusWidget — no post-render wiring needed.
         }
 
         // Load board data from API.
@@ -2277,14 +2506,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Substatus change handler
         async function handleSubstatusChange(e) {
-            const select = e.target;
-            const proposalId = select.dataset.proposalId;
-            const newSubstatus = select.value;
-            // Keep the card in its CURRENT column. Reading the column from
-            // data-column (set in createCard) means the same handler works
-            // for both beta-testing and alpha-polish without conditionals.
-            const currentColumn = select.dataset.column || 'beta testing';
+            // Legacy handler — kept as no-op since the dropdown is removed.
+            // All substatus changes now flow through handleSubstatusAdvance.
+        }
 
+        async function handleSubstatusAdvance(e) {
+            e.stopPropagation(); // don't open history drawer
+            const btn = e.currentTarget;
+            const proposalId = btn.dataset.proposalId;
+            const nextSubstatus = btn.dataset.next;
+            const currentColumn = btn.dataset.column || 'beta testing';
+
+            btn.disabled = true;
+            btn.style.opacity = '0.5';
             try {
                 const response = await fetch(`${API_BASE}/api/workflow/transition`, {
                     method: 'POST',
@@ -2292,21 +2526,24 @@ document.addEventListener('DOMContentLoaded', () => {
                     body: JSON.stringify({
                         proposal_id: proposalId,
                         target_column: currentColumn,
-                        target_substatus: newSubstatus,
+                        target_substatus: nextSubstatus,
                         gate_passed: 1
                     })
                 });
 
                 if (!response.ok) {
                     const errorData = await response.json().catch(() => ({}));
-                    showError(errorData.detail || `Failed to update substatus`);
-                    select.value = select.dataset.prevValue;
+                    showError(errorData.detail || 'Failed to advance substatus');
+                    btn.disabled = false;
+                    btn.style.opacity = '';
                 } else {
                     hideError();
+                    loadBoard();
                 }
             } catch (err) {
                 showError(`Network error: ${err.message}`);
-                select.value = select.dataset.prevValue;
+                btn.disabled = false;
+                btn.style.opacity = '';
             }
         }
 
@@ -2336,28 +2573,50 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (!body) return;
                     
                     const transitions = data.history || [];
+                    let html = '';
+                    
+                    // Add tabs for Document viewing directly inside the history modal
+                    html += `
+                        <div style="margin-bottom: 15px; display: flex; gap: 10px; border-bottom: 1px solid var(--border-color); padding-bottom: 10px;">
+                            <button class="system-button" onclick="window.Kanban_loadArtifactInline(this, '${proposalId}', 'proposal')" 
+                                    style="background: none; border: 1px solid var(--border-color); color: var(--text-color); padding: 6px 12px; border-radius: 4px; cursor: pointer; transition: all 0.2s;">
+                                Proposal & Verdict
+                            </button>
+                            <button class="system-button" onclick="window.Kanban_loadArtifactInline(this, '${proposalId}', 'beta_handoff')" 
+                                    style="background: none; border: 1px solid var(--border-color); color: var(--text-color); padding: 6px 12px; border-radius: 4px; cursor: pointer; transition: all 0.2s;">
+                                Beta Handoff
+                            </button>
+                            <button class="system-button" onclick="window.Kanban_loadArtifactInline(this, '${proposalId}', 'alpha_handoff')" 
+                                    style="background: none; border: 1px solid var(--border-color); color: var(--text-color); padding: 6px 12px; border-radius: 4px; cursor: pointer; transition: all 0.2s;">
+                                Alpha Handoff
+                            </button>
+                        </div>
+                        <div id="kanban-inline-doc" style="display: none; background: var(--bg-darker); padding: 15px; border-radius: 4px; border: 1px solid var(--border-color); margin-bottom: 20px; max-height: 400px; overflow-y: auto; font-family: monospace; white-space: pre-wrap; font-size: 13px;"></div>
+                    `;
+
                     if (transitions.length === 0) {
-                        body.innerHTML = '<p class="placeholder">No transition history found.</p>';
+                        html += '<p class="placeholder">No transition history found.</p>';
                     } else {
-                            body.innerHTML = transitions.map((t, i) => {
-                                const approver = t.approver || 'system';
-                                const reason = t.reason ? ` (${escapeHtml(t.reason)})` : '';
-                                const gatePassed = t.gate_passed !== undefined ? ` [gate:${t.gate_passed}]` : '';
-                                return `
-                                    <div class="kanban-transition-item">
-                                        <span class="label">${escapeHtml(t.from_column || 'N/A')}</span>
-                                        <span class="arrow">→</span>
-                                        <span class="value">${escapeHtml(t.to_column)}</span>
-                                        <span class="timestamp">${escapeHtml(new Date(t.ts || 0).toLocaleString())}</span>
-                                        <span class="note">${approver}${reason}${gatePassed}</span>
-                                    </div>
-                                `;
-                            }).join('');
+                        html += transitions.map((t, i) => {
+                            const approver = t.approver || 'system';
+                            const reason = t.reason ? ` (${escapeHtml(t.reason)})` : '';
+                            const gatePassed = t.gate_passed !== undefined ? ` [gate:${t.gate_passed}]` : '';
+                            return `
+                                <div class="kanban-transition-item">
+                                    <span class="label">${escapeHtml(t.from_column || 'N/A')}</span>
+                                    <span class="arrow">→</span>
+                                    <span class="value">${escapeHtml(t.to_column)}</span>
+                                    <span class="timestamp">${escapeHtml(new Date(t.ts || 0).toLocaleString())}</span>
+                                    <span class="note">${approver}${reason}${gatePassed}</span>
+                                </div>
+                            `;
+                        }).join('');
                     }
+                    body.innerHTML = html;
                 })
                 .catch(err => {
                     if (!body) return;
-                    body.innerHTML = `<p class="placeholder">Failed to load history: ${err.message || 'Unknown error'}</p>`;
+                    body.innerHTML = `<p style="color:red">Failed to load history: ${err.message}</p>`;
                 });
             
             historyOverlay.classList.add('active');
@@ -2367,30 +2626,53 @@ document.addEventListener('DOMContentLoaded', () => {
             historyOverlay.classList.remove('active');
         }
 
-        // Close history drawer when clicking close button
-        document.getElementById('kanban-history-close').addEventListener('click', hideHistory);
-
-        // Close on Esc key
-        document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape' && historyOverlay.classList.contains('active')) {
-                hideHistory();
-            }
-        });
-
-        // Close on overlay click
+        // Close history drawer when clicking outside the panel
         historyOverlay.addEventListener('click', (e) => {
             if (e.target === historyOverlay) {
                 hideHistory();
             }
         });
 
-        // Close error banner button
-        if (closeErrorBtn) {
-            closeErrorBtn.addEventListener('click', hideError);
-        }
+        // Close via Escape key
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && historyOverlay.classList.contains('active')) {
+                hideHistory();
+            }
+        });
 
-        // Expose public API
-        return {
+        // We use window.Kanban_loadArtifactInline instead of exposing it on Kanban,
+        // because inline onclick attributes execute in global scope.
+        window.Kanban_loadArtifactInline = async function(btnNode, proposalId, type) {
+            const docContainer = document.getElementById('kanban-inline-doc');
+            if (!docContainer) return;
+            
+            // Highlight active button
+            const buttons = btnNode.parentElement.querySelectorAll('button');
+            buttons.forEach(b => {
+                b.style.background = 'none';
+                b.style.borderColor = 'var(--border-color)';
+            });
+            btnNode.style.background = 'color-mix(in srgb, var(--accent-color) 20%, transparent)';
+            btnNode.style.borderColor = 'var(--accent-color)';
+
+            docContainer.style.display = 'block';
+            docContainer.innerHTML = '<em>Loading ' + type + '...</em>';
+            
+            try {
+                const response = await fetch(`${API_BASE}/api/workflow/artifact/${proposalId}?type=${type}`);
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                const data = await response.json();
+                docContainer.textContent = data.content || "Document is empty.";
+            } catch (err) {
+                docContainer.innerHTML = `<span style="color:var(--lms-log-err)">Not found or not generated yet: ${err.message}</span>`;
+            }
+        };
+
+        // Re-inject the global wrapper into the html string 
+        // to use the new global window function.
+        window.Kanban = {
             loadBoard,
             showError,
             hideError,
