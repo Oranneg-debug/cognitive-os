@@ -3,7 +3,7 @@ type: SOP
 domain: model_benchmarking
 applies_to:
   - cognitive-os/src/lmstudio_loader.py
-  - cognitive-os/scratch/bench_hermes.py
+  - cognitive-os/scripts/bench_hermes.py
   - cognitive-os/scratch/bench_hermes_results.jsonl
 last_verified: 2026-05-21
 last_verified_against:
@@ -93,14 +93,14 @@ executor of this SOP. A human can also run the same steps manually.
 
 ## The Bench Itself
 
-The harness lives at `cognitive-os/scratch/bench_hermes.py` (despite the
+The harness lives at `cognitive-os/scripts/bench_hermes.py` (promoted from
 name, it works for any model — "hermes" is just a historical artifact).
 
 ### One-line invocation
 
 ```powershell
 cd e:/Antigravity
-python cognitive-os/scratch/bench_hermes.py <model_key> --context <N> --n-parallel 1 --kv f16
+python cognitive-os/scripts/bench_hermes.py <model_key> --context <N> --n-parallel 1 --kv f16
 ```
 
 ### What it does
@@ -192,14 +192,14 @@ To compare two quants of the same model:
 
 ```powershell
 # Bench A
-python cognitive-os/scratch/bench_hermes.py <model_key> --context 65536 --n-parallel 1 --kv f16
+python cognitive-os/scripts/bench_hermes.py <model_key> --context 65536 --n-parallel 1 --kv f16
 
 # Swap the .gguf file by ejecting + reloading with a different per-model config:
 # (manually edit cfgFile to point at the alternate quant — LM Studio picks the
 # .gguf file from the prefs)
 
 # Bench B
-python cognitive-os/scratch/bench_hermes.py <model_key> --context 65536 --n-parallel 1 --kv f16
+python cognitive-os/scripts/bench_hermes.py <model_key> --context 65536 --n-parallel 1 --kv f16
 ```
 
 Both rows land in the JSONL with the same `model_key` but different

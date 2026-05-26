@@ -110,9 +110,6 @@ DECISIONS_DIR = VAULT_DEV / "decisions"
 # Templates directory in vault
 TEMPLATES_DIR = VAULT_DEV / "templates"
 
-# Kanban board path
-KANBAN_FILE = VAULT_SEEDLINGS / "Dev-KanBan.md"
-
 # AI-Help mirror in vault (cognitive-os writes council outputs here)
 VAULT_AI_HELP = VAULT_ROOT / "AI-Help"
 VAULT_COUNCIL_OUTPUTS = VAULT_AI_HELP / "cognitive-os"
@@ -153,7 +150,6 @@ __all__ = [
     "VAULT_RELEASES_DIR",
     "DECISIONS_DIR",
     "TEMPLATES_DIR",
-    "KANBAN_FILE",
     "VAULT_AI_HELP",
     "VAULT_COUNCIL_OUTPUTS",
     "VAULT_MEMORY_LOGS",

@@ -2190,34 +2190,51 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         // Render board columns
+        //
+        // CRITICAL: cards must be appended as real DOM nodes (returned by
+        // createCard) — NOT serialized through .outerHTML. createCard
+        // attaches dragstart/dragend/click listeners directly on the
+        // element via addEventListener, and those listeners are LOST when
+        // the element is round-tripped through an HTML string. The dead
+        // drag-and-drop bug we hunted on 2026-05-26 was caused by exactly
+        // that. Build columns as DOM nodes, then appendChild each card.
         function renderBoard(cardsByColumn) {
             const board = document.getElementById('kanban-board');
             if (!board) return;
 
-            let html = '';
+            // Clear with replaceChildren so any previously-attached
+            // listeners on stale nodes get garbage-collected cleanly.
+            board.replaceChildren();
+
             CANONICAL_COLUMNS.forEach(columnId => {
                 const columnCards = cardsByColumn[columnId] || [];
-                html += `
-                    <div class="kanban-column" data-column-id="${columnId}">
-                        <div class="kanban-column-header">
-                            <h3>${escapeHtml(columnId)}</h3>
-                            <span class="kanban-column-count">${columnCards.length}</span>
-                        </div>
-                        <div class="kanban-column-body">
-                            ${columnCards.map(card => createCard(card).outerHTML).join('')}
-                        </div>
-                    </div>
-                `;
+
+                const colEl = document.createElement('div');
+                colEl.className = 'kanban-column';
+                colEl.dataset.columnId = columnId;
+
+                const headerEl = document.createElement('div');
+                headerEl.className = 'kanban-column-header';
+                const h3 = document.createElement('h3');
+                h3.textContent = columnId;
+                const countEl = document.createElement('span');
+                countEl.className = 'kanban-column-count';
+                countEl.textContent = String(columnCards.length);
+                headerEl.appendChild(h3);
+                headerEl.appendChild(countEl);
+
+                const bodyEl = document.createElement('div');
+                bodyEl.className = 'kanban-column-body';
+                columnCards.forEach(card => bodyEl.appendChild(createCard(card)));
+
+                colEl.appendChild(headerEl);
+                colEl.appendChild(bodyEl);
+                board.appendChild(colEl);
+
+                setupDropZone(colEl);
             });
 
-            board.innerHTML = html;
-
-            // Attach drop zones
-            document.querySelectorAll('.kanban-column').forEach(column => {
-                setupDropZone(column);
-            });
-
-            // Attach substatus change handlers
+            // Substatus selects live inside cards — query the live DOM.
             document.querySelectorAll('.beta-substatus').forEach(select => {
                 select.addEventListener('change', handleSubstatusChange);
             });

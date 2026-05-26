@@ -1,13 +1,12 @@
 """Integration tests for the kanban migration API — ARCH-DA5B0A2D (A3).
 
-Exercises the five new endpoints end-to-end through the FastAPI
+Exercises the kanban endpoints end-to-end through the FastAPI
 ``TestClient``. The store is redirected to ``tmp_path`` per-test via
 monkeypatching the module-level singleton — production
 ``dev/kanban_state.sqlite`` is never written.
 
-The vault mirror is redirected the same way: each test monkeypatches
-``src.kanban_renderer.KANBAN_FILE`` to ``tmp_path / "Dev-KanBan.md"``
-before its first endpoint call.
+The vault Dev-KanBan.md mirror was deleted 2026-05-26; the dashboard
+at http://127.0.0.1:5000 is the only board editor now.
 """
 
 from __future__ import annotations
@@ -20,8 +19,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 import src.api as api_mod
-import src.kanban_renderer as renderer_mod
 from src.api import app
+from src.approval_logger import ApprovalLogger
 from src.kanban_store import CANONICAL_COLUMNS, KanbanStore
 
 
@@ -32,28 +31,49 @@ from src.kanban_store import CANONICAL_COLUMNS, KanbanStore
 
 @pytest.fixture()
 def isolated_kanban(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
-    """Redirect kanban_store + renderer to ``tmp_path`` for one test.
+    """Redirect kanban_store to ``tmp_path`` for one test.
 
-    Substitutes:
-      - ``src.api.kanban_store`` → new ``KanbanStore`` rooted at tmp_path
-      - ``src.kanban_renderer.KANBAN_FILE`` → tmp_path / "Dev-KanBan.md"
-
-    Initialises the schema synchronously before yielding so endpoints
-    don't depend on the FastAPI lifespan (TestClient does run lifespan
-    on enter, but we want the schema there even when callers don't use
-    the context-manager form).
+    Substitutes ``src.api.kanban_store`` → new ``KanbanStore`` rooted at
+    tmp_path. Initialises the schema synchronously before yielding so
+    endpoints don't depend on the FastAPI lifespan.
     """
     db_path = tmp_path / "kanban_state.sqlite"
     backup_dir = tmp_path / ".backups"
     fake_store = KanbanStore(db_path=db_path, backup_dir=backup_dir)
     asyncio.run(fake_store.init_schema())
 
-    vault_file = tmp_path / "Dev-KanBan.md"
-
     monkeypatch.setattr(api_mod, "kanban_store", fake_store)
-    monkeypatch.setattr(renderer_mod, "KANBAN_FILE", vault_file)
+
+    # Isolate ApprovalLogger so the proposal-stage approval gate reads
+    # from tmp_path, not production dev/decisions/index.sqlite.
+    fake_decisions = tmp_path / "decisions"
+    fake_decisions.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr("src.approval_logger.DECISIONS_DIR", fake_decisions)
+    monkeypatch.setattr(
+        "src.approval_logger.DB_PATH", fake_decisions / "index.sqlite"
+    )
+
+    # Disable background tasks (severity dispatcher + beta council) — they
+    # would otherwise try to call the orchestrator / LM Studio in tests.
+    monkeypatch.setattr(
+        api_mod, "_dispatch_proposal_council", lambda *a, **k: None
+    )
+    monkeypatch.setattr(
+        api_mod, "_run_beta_council_and_handoff", lambda *a, **k: None
+    )
 
     yield tmp_path
+
+
+def _seed_approval(proposal_id: str, decision: str = "APPROVED") -> None:
+    """Helper: write an approval_log row so the proposal→beta gate passes."""
+    ApprovalLogger().log_approval(
+        proposal_id=proposal_id,
+        phase="proposal_council",
+        status=decision,
+        approver="test_fixture",
+        reason="seeded by test",
+    )
 
 
 @pytest.fixture()
@@ -88,10 +108,8 @@ def test_get_board_returns_six_empty_columns(client: TestClient):
 # ════════════════════════════════════════════════════════════════════
 
 
-def test_add_card_happy_path_creates_card_and_writes_vault_mirror(
-    client: TestClient, isolated_kanban: Path
-):
-    """A3.2 — add_card returns the card AND triggers a vault-mirror write."""
+def test_add_card_happy_path_creates_card(client: TestClient, isolated_kanban: Path):
+    """A3.2 — add_card returns the card and persists it to SQLite."""
     payload = {
         "proposal_id": "ARCH-API-001",
         "prefix": "ARCH",
@@ -106,10 +124,11 @@ def test_add_card_happy_path_creates_card_and_writes_vault_mirror(
     assert body["status"] == "success"
     assert body["card"]["proposal_id"] == "ARCH-API-001"
     assert body["card"]["column_name"] == "proposal"
-    # Vault mirror was written
-    vault_path = Path(body["vault_mirror"])
-    assert vault_path.exists()
-    assert "ARCH-API-001" in vault_path.read_text(encoding="utf-8")
+
+    # Confirm via GET that the card landed in the store.
+    board = client.get("/api/kanban/board").json()
+    proposal_col = next(c for c in board["columns"] if c["name"] == "proposal")
+    assert any(card["proposal_id"] == "ARCH-API-001" for card in proposal_col["cards"])
 
 
 def test_add_card_rejects_unknown_column_with_422(client: TestClient):
@@ -153,6 +172,74 @@ def test_add_card_is_idempotent(client: TestClient):
 
 
 # ════════════════════════════════════════════════════════════════════
+#  PUT /api/kanban/cards/{id}
+# ════════════════════════════════════════════════════════════════════
+
+
+def test_update_card_happy_path(client: TestClient):
+    """Test that we can update a card's severity."""
+    client.post("/api/kanban/cards", json={
+        "proposal_id": "ARCH-UPDATE-001",
+        "prefix": "ARCH",
+        "column_name": "proposal",
+        "approver": "test",
+    })
+    r = client.put("/api/kanban/cards/ARCH-UPDATE-001", json={"severity": "high"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["card"]["severity"] == "high"
+
+
+def test_update_card_404s_on_missing(client: TestClient):
+    """Test that updating a non-existent card returns 404."""
+    r = client.put("/api/kanban/cards/NON-EXISTENT", json={"severity": "high"})
+    assert r.status_code == 404
+
+
+def test_update_card_400s_on_no_updates(client: TestClient):
+    """Test that an empty update request returns 400."""
+    client.post("/api/kanban/cards", json={
+        "proposal_id": "ARCH-UPDATE-002",
+        "prefix": "ARCH",
+        "column_name": "proposal",
+        "approver": "test",
+    })
+    r = client.put("/api/kanban/cards/ARCH-UPDATE-002", json={})
+    assert r.status_code == 400
+
+
+# ════════════════════════════════════════════════════════════════════
+#  DELETE /api/kanban/cards/{id}
+# ════════════════════════════════════════════════════════════════════
+
+
+def test_delete_card_happy_path(client: TestClient):
+    """Test that we can delete a card."""
+    client.post("/api/kanban/cards", json={
+        "proposal_id": "ARCH-DELETE-001",
+        "prefix": "ARCH",
+        "column_name": "proposal",
+        "approver": "test",
+    })
+    # Verify it exists first
+    r_get = client.get("/api/kanban/cards/ARCH-DELETE-001")
+    assert r_get.status_code == 200
+
+    r_del = client.delete("/api/kanban/cards/ARCH-DELETE-001")
+    assert r_del.status_code == 200
+
+    # Verify it's gone
+    r_get2 = client.get("/api/kanban/cards/ARCH-DELETE-001")
+    assert r_get2.status_code == 404
+
+
+def test_delete_card_404s_on_missing(client: TestClient):
+    """Test that deleting a non-existent card returns 404."""
+    r = client.delete("/api/kanban/cards/NON-EXISTENT")
+    assert r.status_code == 404
+
+
+# ════════════════════════════════════════════════════════════════════
 #  POST /api/workflow/transition
 # ════════════════════════════════════════════════════════════════════
 
@@ -165,6 +252,7 @@ def test_transition_moves_card_and_writes_mirror(client: TestClient):
         "column_name": "proposal",
         "approver": "test",
     })
+    _seed_approval("ARCH-MV-001")  # new gate: required for proposal→beta
     r = client.post("/api/workflow/transition", json={
         "proposal_id": "ARCH-MV-001",
         "target_column": "beta testing",
@@ -177,14 +265,10 @@ def test_transition_moves_card_and_writes_mirror(client: TestClient):
     body = r.json()
     assert body["card"]["column_name"] == "beta testing"
     assert body["card"]["substatus"] == "planning"
-    # Vault mirror reflects the new state
-    vault = Path(body["vault_mirror"]).read_text(encoding="utf-8")
-    # In the rendered file, ARCH-MV-001 should be under "## Beta Testing"
-    beta_idx = vault.find("## Beta Testing")
-    next_col_idx = vault.find("## Alpha Polish")
-    assert beta_idx != -1 and next_col_idx != -1
-    beta_block = vault[beta_idx:next_col_idx]
-    assert "ARCH-MV-001" in beta_block
+    # Confirm via GET that the card is now under "beta testing".
+    board = client.get("/api/kanban/board").json()
+    beta_col = next(c for c in board["columns"] if c["name"] == "beta testing")
+    assert any(card["proposal_id"] == "ARCH-MV-001" for card in beta_col["cards"])
 
 
 def test_transition_returns_404_for_missing_card(client: TestClient):
@@ -218,16 +302,70 @@ def test_transition_rejects_bad_gate_passed_with_422(client: TestClient):
     client.post("/api/kanban/cards", json={
         "proposal_id": "ARCH-MV-003",
         "prefix": "ARCH",
-        "column_name": "proposal",
+        "column_name": "backlog",
         "approver": "test",
     })
+    # Target 'proposal' (not 'beta testing') so the new approval-gate
+    # check doesn't pre-empt the gate_passed validation. The approval
+    # gate only fires on transitions INTO beta_testing.
     r = client.post("/api/workflow/transition", json={
         "proposal_id": "ARCH-MV-003",
-        "target_column": "beta testing",
+        "target_column": "proposal",
         "approver": "test",
         "gate_passed": 42,
     })
     assert r.status_code == 422, r.text
+
+
+def test_transition_rejects_proposal_to_beta_without_approval(client: TestClient):
+    """New: proposal → beta_testing blocked when no APPROVED row exists."""
+    client.post("/api/kanban/cards", json={
+        "proposal_id": "ARCH-GATE-001",
+        "prefix": "ARCH",
+        "column_name": "proposal",
+        "approver": "test",
+    })
+    r = client.post("/api/workflow/transition", json={
+        "proposal_id": "ARCH-GATE-001",
+        "target_column": "beta testing",
+        "approver": "test",
+    })
+    assert r.status_code == 422, r.text
+    assert "council has not APPROVED" in r.json()["detail"]
+
+
+def test_transition_rejects_proposal_to_beta_when_rejected(client: TestClient):
+    """New: proposal → beta_testing blocked when council REJECTED."""
+    client.post("/api/kanban/cards", json={
+        "proposal_id": "ARCH-GATE-002",
+        "prefix": "ARCH",
+        "column_name": "proposal",
+        "approver": "test",
+    })
+    _seed_approval("ARCH-GATE-002", decision="REJECTED")
+    r = client.post("/api/workflow/transition", json={
+        "proposal_id": "ARCH-GATE-002",
+        "target_column": "beta testing",
+        "approver": "test",
+    })
+    assert r.status_code == 422, r.text
+
+
+def test_transition_allows_proposal_to_beta_when_auto_approved(client: TestClient):
+    """New: AUTO-APPROVED (low severity) lets the card through the gate."""
+    client.post("/api/kanban/cards", json={
+        "proposal_id": "ARCH-GATE-003",
+        "prefix": "ARCH",
+        "column_name": "proposal",
+        "approver": "test",
+    })
+    _seed_approval("ARCH-GATE-003", decision="AUTO-APPROVED")
+    r = client.post("/api/workflow/transition", json={
+        "proposal_id": "ARCH-GATE-003",
+        "target_column": "beta testing",
+        "approver": "test",
+    })
+    assert r.status_code == 200, r.text
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -243,6 +381,7 @@ def test_rollback_reverts_to_previous_column(client: TestClient):
         "column_name": "proposal",
         "approver": "test",
     })
+    _seed_approval("ARCH-RB-001")
     client.post("/api/workflow/transition", json={
         "proposal_id": "ARCH-RB-001",
         "target_column": "beta testing",
@@ -282,6 +421,7 @@ def test_rollback_appends_rollback_transition_to_history(client: TestClient):
         "column_name": "proposal",
         "approver": "test",
     })
+    _seed_approval("ARCH-RB-HIST-001")
     client.post("/api/workflow/transition", json={
         "proposal_id": "ARCH-RB-HIST-001",
         "target_column": "beta testing",
@@ -327,7 +467,11 @@ def test_get_state_respects_history_limit_param(client: TestClient):
         "column_name": "backlog",
         "approver": "test",
     })
+    # Move via each column. Seed approval AFTER the proposal hop so the
+    # proposal→beta gate passes for the next iteration.
     for col in ("proposal", "beta testing", "alpha polish", "finalized"):
+        if col == "beta testing":
+            _seed_approval("ARCH-ST-LIM-001")
         client.post("/api/workflow/transition", json={
             "proposal_id": "ARCH-ST-LIM-001",
             "target_column": col,

@@ -5,14 +5,10 @@ description: "Master configuration for all AI models and roles in the Cognitive 
 ---
 
 ```yaml
-# Integration Feature Flags (Phase 5, CSTR-PHASE5-V2: default to true).
-# Set any flag to false to revert that subsystem to legacy behavior.
-# Read once at startup and cached; restart the API to pick up changes.
 integration:
   output_router_enabled: true
   workflow_engine_enabled: true
   governance_uow_enabled: true
-
 models:
   deepseek-coder-v2-lite-instruct:
     context_window: 128000
@@ -155,20 +151,20 @@ model_presets:
   gpu_layers: -1
 roles:
   simple:
-    model: qwen3-vl-4b-thinking
+    model: qwen3.5-2b
     compass_weight: IGNORE
     system_prompt: "You are a fast, precise and very accurate assistant. Be concise.\nOutput ONLY valid JSON in this exact structure:\n{\n    \"response\": \"Your concise answer here.\",\n    \"action_taken\": \"Summary of action.\"\n}\n"
-    temperature: 0.5
-    top_p: 0.95
+    temperature: 0.6
+    top_p: 0.9
     top_k: 25
     repeat_penalty: 1
-    min_p: 0.05
+    min_p: 0.1
     max_tokens: 16000
-    context_window: 260000
+    context_window: 125000
     gpu_layers: 0
     enabled: true
     n_parallel: 2
-    reasoning_enabled: true
+    reasoning_enabled: false
     batch_size: 1024
   standard:
     model: qwen3.5-9b-claude-4.6-highiq-instruct-heretic-uncensored
@@ -234,40 +230,9 @@ roles:
     system_prompt: 'NFT metadata specialist.
 
       '
-  dev_proposal_refiner:
-    model: deepseek-coder-v2-lite-instruct
-    temperature: 0.2
-    compass_weight: MEDIUM WEIGHT
-    system_prompt: 'You are a precise technical writer and software architect. Your task is to review the user''s raw notes and rewrite them into a formal, comprehensive development proposal.
-
-      The output must be a single, complete markdown file.
-
-      Structure the proposal with the following sections:
-
-      1.  **Objective**: A clear, concise statement of what the proposal aims to achieve.
-
-      2.  **Technical Approach**: A detailed explanation of the proposed solution.
-
-      3.  **Alternatives Considered**: A brief description of other possible solutions and why the proposed approach was chosen.
-
-      4.  **Potential Risks**: An analysis of potential technical or logistical risks.
-
-      5.  **Implementation Plan**: A high-level outline of the steps to complete the project.
-
-      6.  **Improvement Suggestions**: Any ideas for future enhancements beyond the current scope.
-
-      7.  **Model Recommendations**: Suggest the best AI models for any tasks involved.
-
-      Preserve the user''s core ideas and key points. Output ONLY the markdown content, with no other text or explanations.
-
-      '
-    top_p: 0.95
-    top_k: 40
-    repeat_penalty: 1.1
-    min_p: 0.1
-    max_tokens: 4048
-    context_window: 16384
-    gpu_layers: -1
+  # dev_proposal_refiner removed 2026-05-26: replaced by severity-dispatched
+  # boardroom/technical-meeting on the backlog→proposal drop. See
+  # src/api.py::_dispatch_proposal_council.
   dev_beta_council:
     model: qwen3.6-35b-a3b-uncensored-hauhaucs-aggressive
     temperature: 1
@@ -570,22 +535,9 @@ roles:
     reasoning_enabled: true
     batch_size: 1024
   handoff_planner:
-    # ARCH-5DFB393F (A1) — Decomposes a council verdict into a
-    # code-ready implementation checklist for the receiving editor.
-    # The actual system prompt is the module constant
-    # `_PLANNER_SYSTEM_PROMPT` in src/handoff_planner.py (kept as code,
-    # not config, because it contains worked markdown examples that are
-    # painful to wrangle inside a YAML string).
-    #
-    # Model swap 2026-05-25 (post-finalization): ministral-3-3b emitted
-    # invalid JSON twice + timed out on the dashboard-migration handoff
-    # (~600 lines of input). Swapped to deepseek-coder-v2-lite-instruct:
-    # MoE 16B/2.4B-active, trained on structured-output tasks, higher
-    # JSON-schema fidelity at low temp. Swap path documented in
-    # docs/HANDOFF_PLANNER_OUTPUT_SPEC.md §6.
     model: deepseek-coder-v2-lite-instruct
     compass_weight: IGNORE
-    system_prompt: "See _PLANNER_SYSTEM_PROMPT in src/handoff_planner.py — kept as Python module constant for legibility."
+    system_prompt: "See _PLANNER_SYSTEM_PROMPT in src/handoff_planner.py \u2014 kept as Python module constant for legibility."
     temperature: 0.2
     top_p: 0.9
     top_k: 40
@@ -595,11 +547,6 @@ roles:
     gpu_layers: -1
     n_parallel: 1
     enabled: true
-
 handoff:
-  # ARCH-5DFB393F (A11) — When true (default), HandoffWriter calls
-  # HandoffPlanner.plan() to produce the `## 🔧 Implementation Tasks`
-  # block. When false, falls back to the legacy regex extractor in
-  # handoff_writer.py.
   planner_enabled: true
 ```

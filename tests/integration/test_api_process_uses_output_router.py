@@ -12,7 +12,7 @@ runs for real, which is the point of an integration test.
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import patch, AsyncMock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -38,8 +38,8 @@ def client() -> TestClient:
 def test_process_endpoint_routes_boardroom_to_proposals(client: TestClient) -> None:
     written_path: Path | None = None
     try:
-        with patch("src.api.orchestrator.process_request", return_value=BOARDROOM_FIXTURE) as mock_proc:
-            response = client.post("/process", json={"prompt": "test"})
+        with patch("src.api.orchestrator.process_request", new_callable=AsyncMock, return_value=BOARDROOM_FIXTURE) as mock_proc:
+            response = client.post("/api/process", json={"prompt": "test"})
 
         assert response.status_code == 200, response.text
         body = response.json()

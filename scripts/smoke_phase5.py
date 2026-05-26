@@ -13,13 +13,14 @@ production wiring that must work for a Phase 5 deploy:
        path. Verifies routing landed in dev/decisions/ and NOT under
        AI-Help/cognitive-os/.
 
-  e1c  ApprovalLogger gains one entry for a SMOKE proposal_id and
-       KanbanProcessor.update_kanban_status updates a proposal file's
-       frontmatter `phase` field correctly. Both are the concrete signals
-       the handoff E1 spec lines 199-200 asked for ("kanban card status
-       updated" + "approval_log SQLite gained one entry"), exercised
-       directly against production state without running the full
-       WorkflowEngine saga (which would touch real git branches/tags).
+  e1c  ApprovalLogger gains one entry for a SMOKE proposal_id AND
+       kanban_store.add_card/move_card succeed against the prod SQLite.
+       Both are the concrete signals the handoff E1 spec lines 199-200
+       asked for ("kanban card status updated" + "approval_log SQLite
+       gained one entry"), exercised against production state without
+       running the full WorkflowEngine saga (which would touch real git
+       branches/tags). 2026-05-26: rewritten after the file-watcher
+       (kanban_processor.py) was deleted — board state is now SQLite.
 
 Usage:
     python scripts/smoke_phase5.py                # run all three probes
@@ -55,8 +56,9 @@ def _eprint(msg: str) -> None:
 
 
 def _new_smoke_id() -> str:
-    """Smoke proposal IDs use the DEV- prefix so prod regexes accept them
-    without any kanban_processor regex changes."""
+    """Smoke proposal IDs use the DEV- prefix so prod accepts them."""
+    # Format must match kanban_store's expected DEV-YYYYMMDD-HHMMSS-XXXXXXXX
+    # (compact date, no internal dash inside the rand suffix).
     ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     rand = secrets.token_hex(4).upper()
     return f"DEV-{ts}-{rand}"
@@ -123,15 +125,16 @@ def probe_e1b(smoke_id: str) -> Dict[str, Any]:
 
 
 # ----------------------------------------------------------------------------
-# E1c — ApprovalLogger + KanbanProcessor wiring against real prod state
+# E1c — ApprovalLogger + kanban_store wiring against real prod state
 # ----------------------------------------------------------------------------
 def probe_e1c(smoke_id: str) -> Dict[str, Any]:
-    _eprint(f"[e1c] exercising kanban + approval_log wiring ({smoke_id})...")
+    _eprint(f"[e1c] exercising kanban_store + approval_log wiring ({smoke_id})...")
+    import asyncio
     from src.approval_logger import ApprovalLogger
-    from src.kanban_processor import KanbanProcessor
+    from src.kanban_store import KanbanStore
     from src.paths import PROPOSALS_DIR
 
-    # ---- Step 1: write a real proposal file the kanban processor can read.
+    # ---- Step 1: write a real proposal file (so backend twin path is realistic).
     proposal_path = PROPOSALS_DIR / f"{smoke_id}_PROPOSAL.md"
     proposal_path.write_text(
         "---\n"
@@ -149,21 +152,30 @@ def probe_e1c(smoke_id: str) -> Dict[str, Any]:
     )
     _eprint(f"[e1c]   wrote {proposal_path}")
 
-    # ---- Step 2: KanbanProcessor.update_kanban_status writes phase to YAML.
-    # We use 'alpha polish' so phase_key maps to 'alpha' (matches WorkflowPhase.ALPHA).
-    # This is the same column-pair D2 used (see commit be9851e).
-    kp = KanbanProcessor()
-    ok = kp.update_kanban_status(str(proposal_path), "alpha polish")
-    if not ok:
-        raise AssertionError("KanbanProcessor.update_kanban_status returned False")
+    # ---- Step 2: kanban_store add_card + move_card round-trip.
+    store = KanbanStore()
+    card = asyncio.run(store.add_card(
+        proposal_id=smoke_id,
+        prefix="DEV",
+        column_name="backlog",
+        title="E1c smoke fixture",
+        severity="low",
+        origin="smoke_phase5",
+        approver="SMOKE_TEST",
+        reason="E1c probe",
+    ))
+    if card.column_name != "backlog":
+        raise AssertionError(f"add_card landed in {card.column_name!r}, expected 'backlog'")
 
-    updated_text = proposal_path.read_text(encoding="utf-8")
-    if "status: pending" not in updated_text:
-        raise AssertionError(
-            f"expected updated frontmatter to contain 'status: pending', got:\n"
-            f"{updated_text[:300]}"
-        )
-    _eprint("[e1c]   PASS kanban status update")
+    moved = asyncio.run(store.move_card(
+        proposal_id=smoke_id,
+        target_column="proposal",
+        approver="SMOKE_TEST",
+        reason="E1c move probe",
+    ))
+    if moved.column_name != "proposal":
+        raise AssertionError(f"move_card landed in {moved.column_name!r}, expected 'proposal'")
+    _eprint("[e1c]   PASS kanban_store add+move round-trip")
 
     # ---- Step 3: ApprovalLogger gains an entry for this smoke_id.
     logger = ApprovalLogger()
@@ -215,7 +227,7 @@ def cleanup(smoke_id: str, written_decision_path: Path | None) -> List[str]:
     probe result.
     """
     warnings: List[str] = []
-    from src.paths import PROPOSALS_DIR, VAULT_ROOT
+    from src.paths import PROPOSALS_DIR
     from src.approval_logger import ApprovalLogger
 
     # Decision artifact written by e1b.
@@ -236,14 +248,15 @@ def cleanup(smoke_id: str, written_decision_path: Path | None) -> List[str]:
     except OSError as exc:
         warnings.append(f"failed to delete {backend_proposal}: {exc}")
 
-    # Vault twin written by KanbanProcessor.update_kanban_status's mirror.
-    vault_proposal = VAULT_ROOT / "1. P - Seedlings" / "dev" / "proposals" / f"{smoke_id}_PROPOSAL.md"
+    # Kanban card written by e1c.
     try:
-        if vault_proposal.exists():
-            vault_proposal.unlink()
-            _eprint(f"[cleanup]   removed {vault_proposal}")
-    except OSError as exc:
-        warnings.append(f"failed to delete {vault_proposal}: {exc}")
+        import asyncio
+        from src.kanban_store import KanbanStore
+        store = KanbanStore()
+        asyncio.run(store.delete_card(smoke_id))
+        _eprint(f"[cleanup]   removed kanban card {smoke_id}")
+    except Exception as exc:  # noqa: BLE001
+        warnings.append(f"failed to delete kanban card {smoke_id}: {exc}")
 
     # approval_log row written by e1c.
     try:

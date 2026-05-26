@@ -6,8 +6,9 @@ JSON-cache scheme in ``kanban_processor.py`` with a real database.
 Design notes
 ------------
 - **Single writer**: only the API (via ``workflow_engine`` ➝ here) writes.
-  The vault ``Dev-KanBan.md`` becomes a one-way render output (see A2:
-  ``kanban_renderer.py``). Eliminates the proposal_sync / kanban_processor
+  SQLite is the single source of truth; the dashboard at
+  http://127.0.0.1:5000 is the only board editor. Eliminates the
+  proposal_sync / kanban_processor
   race that has been our recurring kanban-hiccup source.
 - **Async-safe**: every public method is ``async`` and wraps blocking
   sqlite3 in ``asyncio.to_thread``. FastAPI routes call us directly without
@@ -146,7 +147,7 @@ class Column:
 class BoardSnapshot:
     """A read-only view of the entire board at one instant.
 
-    Returned by ``get_board()``. Consumed by ``kanban_renderer.render`` (A2)
+    Returned by ``get_board()``. Consumed by the dashboard JSON API.
     and the ``/api/kanban/board`` endpoint (A3).
     """
 
@@ -307,6 +308,40 @@ def _row_to_card(row: sqlite3.Row) -> Card:
         updated_ts=row["updated_ts"],
         state_hash=row["state_hash"],
     )
+
+
+def _update_card_sync(db_path: Path, proposal_id: str, updates: dict) -> Card:
+    """Update arbitrary fields on a card."""
+    with _connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT * FROM cards WHERE proposal_id = ?",
+            (proposal_id,),
+        ).fetchone()
+        if row is None:
+            raise CardNotFound(f"No card found for proposal_id={proposal_id!r}")
+
+        # Build the SET clause dynamically from the updates dict
+        set_clauses = []
+        params = []
+        for key, value in updates.items():
+            # Basic sanitization to prevent SQL injection on field names
+            if key not in ("title", "substatus", "severity", "origin"):
+                raise ValueError(f"Invalid field for update: {key}")
+            set_clauses.append(f"{key} = ?")
+            params.append(value)
+
+        if not set_clauses:
+            return _row_to_card(row)  # No updates to apply
+
+        params.append(proposal_id)
+        sql = f"UPDATE cards SET {', '.join(set_clauses)} WHERE proposal_id = ?"
+        conn.execute(sql, tuple(params))
+
+        updated = conn.execute(
+            "SELECT * FROM cards WHERE proposal_id = ?",
+            (proposal_id,),
+        ).fetchone()
+        return _row_to_card(updated)
 
 
 def _row_to_transition(row: sqlite3.Row) -> Transition:
@@ -491,6 +526,20 @@ def _move_card_sync(
             (proposal_id,),
         ).fetchone()
         return _row_to_card(updated)
+
+
+def _delete_card_sync(db_path: Path, proposal_id: str) -> bool:
+    """Delete a card and its history. Returns True if a card was deleted."""
+    with _connect(db_path) as conn:
+        existing = conn.execute(
+            "SELECT 1 FROM cards WHERE proposal_id = ?",
+            (proposal_id,),
+        ).fetchone()
+        if existing is None:
+            return False
+        conn.execute("DELETE FROM transitions WHERE proposal_id = ?", (proposal_id,))
+        cursor = conn.execute("DELETE FROM cards WHERE proposal_id = ?", (proposal_id,))
+        return cursor.rowcount > 0
 
 
 def _get_card_sync(db_path: Path, proposal_id: str) -> Optional[Card]:
@@ -687,6 +736,22 @@ class KanbanStore:
     async def get_card(self, proposal_id: str) -> Optional[Card]:
         """Return one card by id, or ``None`` if not found."""
         return await asyncio.to_thread(_get_card_sync, self.db_path, proposal_id)
+
+    async def update_card(self, proposal_id: str, updates: dict) -> Card:
+        """Update fields on an existing card."""
+        return await asyncio.to_thread(
+            _update_card_sync, self.db_path, proposal_id, updates
+        )
+
+    async def delete_card(self, proposal_id: str) -> bool:
+        """Delete a card and its entire transition history.
+
+        Returns:
+            True if a card was found and deleted, False otherwise.
+        """
+        return await asyncio.to_thread(
+            _delete_card_sync, self.db_path, proposal_id
+        )
 
     # ----------------------------------------------------------------
     #  Board snapshot

@@ -623,17 +623,63 @@ Output your final blueprint in the specified JSON format for your role.""",
             if not clean_input:
                  return "Error: Please provide a description for your proposal along with the tag."
                  
-            print("📝 Creating new development proposal from request...")
-            # Forward source_file_path so the proposal can link back to the
-            # originating Obsidian note (e.g. a message under AI-Help/cognitive-os).
+            print("📝 Creating raw development proposal from request...")
+            # 1. Create the initial raw proposal file
             result = dev_manager.process_dev_proposal(
                 clean_input,
                 origin="Obsidian-Plugin",
                 source_file_path=source_file_path
             )
-            source_note = os.path.splitext(os.path.basename(source_file_path))[0] if source_file_path else None
-            source_msg = f"\nSource note: [[{source_note}]]" if source_note else ""
-            return f"✅ Proposal Created: {result['proposal_id']}\nStatus: Added to Kanban Backlog.{source_msg}"
+            
+            if not result.get("success"):
+                return f"Error: Could not create proposal file. {result.get('error')}"
+
+            print(f"✅ Raw proposal file created: {result['filepath']}")
+            
+            # 2. Immediately run a boardroom review on the new proposal
+            print(f"🏛️ Automatically triggering Boardroom Review for new proposal: {result['proposal_id']}")
+            proposal_content = Path(result['filepath']).read_text(encoding='utf-8')
+            boardroom_input = f"Review and refine the following new development proposal:\n\n{proposal_content}"
+            
+            boardroom_report = self.execute_sequential_boardroom(
+                user_input=boardroom_input, 
+                progress_callback=progress_callback,
+                source_file_path=result['filepath']
+            )
+
+            # 3. Update the original proposal with the boardroom's refined output
+            #    For now, we'll just append the report. A more advanced implementation
+            #    could replace sections.
+            print(f"✍️ Updating proposal file with boardroom review...")
+            with open(result['filepath'], 'a', encoding='utf-8') as f:
+                f.write("\n\n---\n\n## 🏛️ Initial Boardroom Review\n\n")
+                f.write(boardroom_report)
+
+            # 4. Add the now-vetted proposal to the Kanban board in the 'Proposal' column
+            print(f"📋 Adding vetted proposal to Kanban board...")
+            try:
+                import requests
+                import json
+                url = "http://localhost:8000/api/kanban/cards"
+                payload = {
+                    "proposal_id": result['proposal_id'],
+                    "prefix": result['prefix'],
+                    "column_name": "proposal", # Start in 'proposal' not 'backlog'
+                    "title": result['title'],
+                    "origin": result['origin'],
+                    "severity": "medium", # Default severity
+                }
+                headers = {'Content-Type': 'application/json'}
+                response = requests.post(url, data=json.dumps(payload), headers=headers, timeout=5)
+                if response.status_code == 200:
+                    print(f"✅ Successfully added card to 'Proposal' column.")
+                else:
+                    print(f"⚠️ Failed to add card to Kanban. Status: {response.status_code}, Text: {response.text}")
+            except Exception as e:
+                print(f"⚠️ Failed to call API to create Kanban card: {e}")
+
+            return f"✅ Proposal {result['proposal_id']} created, reviewed by boardroom, and added to the 'Proposal' column."
+
         else:
             return f"Pattern {pattern} is not yet fully implemented locally."
 
@@ -771,17 +817,19 @@ Output your final blueprint in the specified JSON format for your role.""",
         """
         Continue the development lifecycle for a proposal moved on the Kanban board.
 
-        Called by kanban_processor when a card is dragged to a new column.
-        Each phase runs the appropriate council/meeting and writes the result
-        back into the proposal file via DevRouteManager.
+        SCOPE (2026-05-26): This method handles ONLY alpha / finalized /
+        deployed transitions. The proposal-stage severity dispatcher AND
+        the beta-stage council+handoff hook both live in
+        ``src/api.py::transition_card`` BackgroundTasks now — see the
+        comment block above that function. The old branches that ran a
+        council on the beta_testing entry have been removed; that work
+        was moved to api.py so the dashboard transition endpoint is the
+        single trigger surface (no more file-watcher).
 
         Args:
-            proposal_id:      The DEV-… ID of the proposal (e.g. DEV-20260518-123456-ABCD)
-            next_phase:       The target lifecycle phase: 'beta', 'alpha', 'finalized', 'deployed'
-            proposal_content: Full markdown content of the proposal file at the time of the move
-
-        Returns:
-            str: Human-readable result message
+            proposal_id:      The DEV-/ARCH-/NLST-… ID of the proposal.
+            next_phase:       'alpha' | 'finalized' | 'deployed'
+            proposal_content: Full markdown content of the proposal file.
         """
         from src.dev_route import DevRouteManager
         dev_manager = DevRouteManager()
@@ -789,40 +837,9 @@ Output your final blueprint in the specified JSON format for your role.""",
         print(f"[LIFECYCLE] Starting phase '{next_phase}' for {proposal_id}")
 
         # ------------------------------------------------------------------
-        # BETA: Technical council reviews the proposal, then a handoff
-        #       document is generated for the developer to work from in VS Code.
-        #       Card stays in Beta Testing (🔍 Review) until the human is done.
-        # ------------------------------------------------------------------
-        if next_phase == "beta_testing":
-            user_input = (
-                f"Review the following development proposal thoroughly.\n\n"
-                f"Your output MUST contain four clearly-headed sections:\n"
-                f"1. **Summary** — what this system does and its purpose\n"
-                f"2. **Difficulties & Constraints** — technical challenges, limitations, risks\n"
-                f"3. **Implementation Tasks** — a numbered list of concrete coding tasks\n"
-                f"4. **Technical Recommendations** — architecture, libraries, patterns to use\n\n"
-                f"Proposal ID: {proposal_id}\n\n"
-                f"{proposal_content}"
-            )
-            report = self.execute_technical_meeting(
-                user_input=user_input,
-                source_file_path=None
-            )
-            # Generate handoff document in vault + source backup, and link proposal
-            handoff_result = dev_manager.generate_beta_handoff(proposal_id, report)
-            if "error" in handoff_result:
-                raise RuntimeError(f"Handoff generation failed: {handoff_result['error']}")
-            return (
-                f"✅ Beta Council review complete for {proposal_id}.\n"
-                f"Handoff saved to: {handoff_result['filename']}\n"
-                f"Open the handoff in VS Code and work through the task checklist.\n"
-                f"Move the card to Alpha Polish when all tasks are ticked off."
-            )
-
-        # ------------------------------------------------------------------
         # ALPHA: Full boardroom produces the Alpha Polish execution plan.
         # ------------------------------------------------------------------
-        elif next_phase == "alpha":
+        if next_phase == "alpha":
             user_input = (
                 f"The following proposal has passed Beta Testing. "
                 f"Produce a comprehensive Alpha Polish plan covering UI/UX refinements, "

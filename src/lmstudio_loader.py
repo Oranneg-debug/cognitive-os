@@ -71,10 +71,12 @@ import logging
 import shutil
 import subprocess
 import sys
+import threading
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Iterator, Mapping
 
 try:
     import lmstudio as lms
@@ -101,6 +103,44 @@ except ImportError:  # pragma: no cover — fallback if cwd differs
 
 
 log = logging.getLogger("lmstudio_loader")
+
+
+# ---------------------------------------------------------------------------
+# Heartbeat (A3 of DEV-20260521-001000-B5D5C0DE)
+# ---------------------------------------------------------------------------
+#: How often the heartbeat thread prints during a long load. 15s is rare
+#: enough to not spam the log, frequent enough that a frozen load is
+#: visible within one screen of scrollback.
+_HEARTBEAT_INTERVAL_S: float = 15.0
+
+
+@contextmanager
+def _heartbeat(label: str, interval_s: float = _HEARTBEAT_INTERVAL_S) -> Iterator[None]:
+    """Background heartbeat: prints '[loader] still loading {label}… Ns elapsed'
+    every ``interval_s`` until the wrapped block exits.
+
+    The thread is a daemon so it can't outlive the interpreter, and it
+    uses a ``threading.Event`` for cancellation rather than relying on
+    GC to stop it. Heartbeats go to stderr via ``log`` so they appear in
+    the FastAPI terminal next to every other loader log line.
+    """
+    stop = threading.Event()
+    started_at = time.monotonic()
+
+    def _tick() -> None:
+        while not stop.wait(interval_s):
+            elapsed = time.monotonic() - started_at
+            log.info("[loader] still loading %s… %.1fs elapsed", label, elapsed)
+
+    t = threading.Thread(target=_tick, name=f"loader-heartbeat({label})", daemon=True)
+    t.start()
+    try:
+        yield
+    finally:
+        stop.set()
+        # Don't join — daemon thread will exit on the event flip; joining
+        # here would block the load return path for up to interval_s on
+        # the rare cancellation path.
 
 
 # ---------------------------------------------------------------------------
@@ -622,12 +662,13 @@ class LMStudioLoader:
 
         t0 = time.monotonic()
         try:
-            handle = downloaded.load_new_instance(
-                ttl=ttl,
-                instance_identifier=identifier,
-                config=sdk_config,
-                on_load_progress=on_progress,
-            )
+            with _heartbeat(model_key):
+                handle = downloaded.load_new_instance(
+                    ttl=ttl,
+                    instance_identifier=identifier,
+                    config=sdk_config,
+                    on_load_progress=on_progress,
+                )
         except (LMStudioModelNotFoundError, LMStudioServerError,
                 LMStudioTimeoutError) as exc:
             raise LoaderError(
@@ -729,16 +770,17 @@ class LMStudioLoader:
         log.info("[loader] CLI load: %s", " ".join(args[1:]))
         t0 = time.monotonic()
         try:
-            result = subprocess.run(
-                args,
-                capture_output=True,
-                text=True,
-                # Force UTF-8 with replacement so cp1252-default Windows
-                # consoles don't blow up on lms-CLI's progress glyphs.
-                encoding="utf-8",
-                errors="replace",
-                timeout=self._load_timeout,
-            )
+            with _heartbeat(f"{model_key} (CLI)"):
+                result = subprocess.run(
+                    args,
+                    capture_output=True,
+                    text=True,
+                    # Force UTF-8 with replacement so cp1252-default Windows
+                    # consoles don't blow up on lms-CLI's progress glyphs.
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=self._load_timeout,
+                )
         except subprocess.TimeoutExpired as exc:
             raise LoaderError(
                 f"lms load {model_key!r} timed out after "

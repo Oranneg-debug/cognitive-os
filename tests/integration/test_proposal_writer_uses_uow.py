@@ -18,7 +18,7 @@ Isolation:
   DB_PATH) so the UoW's internal ApprovalLogger() does not touch real sqlite.
 - ProposalWriter instance attributes (proposals_dir, vault_proposals_dir)
   overridden after construction.
-- _add_card_to_kanban mocked on the instance — it lives OUTSIDE the UoW
+- _add_card_to_store mocked on the instance — it lives OUTSIDE the UoW
   block, so a successful run would call it; a rolled-back run must not.
 """
 
@@ -104,7 +104,7 @@ def test_proposal_writer_rolls_back_on_stage_file_failure(
         # dir genuinely gets created — we want to verify _rollback cleans it up.
         return real_stage_file(self, target_path, content)
 
-    with patch.object(writer, "_add_card_to_kanban") as mock_kanban, patch(
+    with patch.object(writer, "_add_card_to_store") as mock_kanban, patch(
         "src.governance_unit_of_work.GovernanceUnitOfWork.stage_file",
         new=stage_or_raise,
     ):
@@ -128,7 +128,7 @@ def test_proposal_writer_rolls_back_on_stage_file_failure(
     undo_logs = list(uow_log_dir.glob("*.undo.json"))
     assert undo_logs == [], f"undo log leaked: {undo_logs}"
 
-    # 5. _add_card_to_kanban was never invoked (it lives after the `with` block).
+    # 5. _add_card_to_store was never invoked (it lives after the `with` block).
     assert mock_kanban.call_count == 0, "kanban write must not run on rollback"
 
     # 6. No leftover ``.uow_uow_<id>/`` staging directories under tmp_path.

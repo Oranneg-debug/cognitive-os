@@ -8,9 +8,10 @@ import re
 import yaml
 import psutil
 from contextlib import asynccontextmanager
+from datetime import datetime
 from pathlib import Path
 from typing import Optional, Union, Dict, Any
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request, HTTPException, BackgroundTasks
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -21,7 +22,7 @@ from src.filesystem_backend_writer import FilesystemBackendWriter
 from src.routing_rules_schema import load_routing_rules
 from src.orchestrator import Orchestrator
 from src.obsidian_writer import ObsidianWriter
-from src.paths import VAULT_ROOT, DEV_DIR
+from src.paths import VAULT_ROOT, DEV_DIR, PROPOSALS_DIR, VAULT_PROPOSALS_DIR
 from src.uow_recovery import run_recovery
 from src.approval_logger import ApprovalLogger
 
@@ -35,8 +36,6 @@ from src.kanban_store import (
     KanbanStore,
     KanbanStoreError,
 )
-from src.kanban_renderer import write_vault_mirror
-
 from fastapi.middleware.cors import CORSMiddleware
 
 
@@ -334,7 +333,7 @@ def generate_structure_diagram():
     
     # Define key directories and files
     key_items = {
-        "src": ["api.py", "orchestrator.py", "sentry_router.py", "kanban_processor.py", "llm_client.py"],
+        "src": ["api.py", "orchestrator.py", "sentry_router.py", "kanban_store.py", "llm_client.py"],
         "dev": ["master_config.md"],
         "dashboard": ["index.html", "styles.css", "script.js"]
     }
@@ -376,23 +375,24 @@ def generate_flow_diagram():
     return "\n".join(diagram)
 
 def generate_kanban_diagram():
-    """Analyzes kanban_processor to map the automated workflow."""
+    """Map the automated workflow driven by /api/workflow/transition."""
     diagram = [
         "graph TD",
-        "    A[Card moved: Backlog → Proposal] --> B{Kanban Processor};",
-        "    B --> C[Call dev_proposal_refiner];",
-        "    C --> D[Rewrite Proposal MD];",
-        "    E[Card moved: Proposal → Beta Testing] --> F{Kanban Processor};",
-        "    F --> G[Call Orchestrator: continue_development_lifecycle];",
-        "    G --> H(Execute dev_beta_council);",
-        "    I[Card moved: Beta → Alpha] --> J{Kanban Processor};",
-        "    J --> K[Call Orchestrator];",
-        "    K --> L[Flush Embedder];",
-        "    L --> M(Execute dev_alpha_polish);",
-        "    N[Card moved: Alpha → Finalized] --> O{Kanban Processor};",
-        "    O --> P[Call Orchestrator];",
-        "    P --> Q[Flush Embedder];",
-        "    Q --> R(Execute dev_final_audit);",
+        "    A[Card moved: Backlog → Proposal] --> B{/api/workflow/transition};",
+        "    B --> C[Severity dispatcher BackgroundTask];",
+        "    C --> D{severity?};",
+        "    D -->|high| E(Sequential Boardroom);",
+        "    D -->|medium| F(Technical Meeting);",
+        "    D -->|low| G(AUTO-APPROVED);",
+        "    E --> H[approval_log row written];",
+        "    F --> H;",
+        "    G --> H;",
+        "    I[Card moved: Proposal → Beta Testing] --> J{Approval gate};",
+        "    J -->|approved| K(dev_beta_council BackgroundTask);",
+        "    J -->|not approved| L[422 REJECTED];",
+        "    K --> M[BETA_HANDOFF.md written];",
+        "    N[Card moved: Beta → Alpha] --> O[Orchestrator.continue_development_lifecycle];",
+        "    O --> P(dev_alpha_polish);",
     ]
     return "\n".join(diagram)
 
@@ -449,17 +449,26 @@ class LoadRequest(BaseModel):
 
 @app.get("/api/loaded")
 async def list_loaded_and_downloaded():
-    """Snapshot of currently loaded + downloaded models from the loader."""
+    """Snapshot of currently loaded + downloaded models from the loader.
+
+    If LM Studio is offline / unreachable, returns empty lists with an
+    ``lm_studio_offline`` flag rather than 500ing — the dashboard's other
+    tabs (kanban, system, etc.) must keep working when LM Studio is down.
+    """
     loader = _shared_loader()
 
     def _snapshot():
         loaded = []
-        for inst in loader.list_loaded():
+        try:
+            instances = loader.list_loaded()
+        except Exception as exc:  # noqa: BLE001 — LM Studio down, etc.
+            print(f"[API /api/loaded] LM Studio unreachable: {exc!r}")
+            return {"loaded": [], "downloaded": [], "lm_studio_offline": True}
+        for inst in instances:
             entry = {
                 "identifier": inst.identifier,
                 "model_key": inst.model_key,
             }
-            # Best-effort introspection of context_length from SDK handle info
             try:
                 eff = loader.get_effective_config(inst.identifier)
                 if isinstance(eff, dict):
@@ -468,8 +477,11 @@ async def list_loaded_and_downloaded():
             except Exception:
                 pass
             loaded.append(entry)
-        downloaded = sorted(d.model_key for d in loader.list_downloaded())
-        return {"loaded": loaded, "downloaded": downloaded}
+        try:
+            downloaded = sorted(d.model_key for d in loader.list_downloaded())
+        except Exception:
+            downloaded = []
+        return {"loaded": loaded, "downloaded": downloaded, "lm_studio_offline": False}
 
     return await asyncio.to_thread(_snapshot)
 
@@ -602,17 +614,81 @@ async def unload_model(identifier: str):
     return {"status": "ok", "identifier": identifier}
 
 
+def _bench_new_model(model_key: str) -> None:
+    """Background-task entrypoint that benches a freshly-downloaded model.
+
+    Shells out to ``scripts/bench_hermes.py`` so the bench harness lives
+    in one place (A6 of DEV-…-B5D5C0DE) instead of duplicating its logic
+    inline. The script appends one JSONL row to
+    ``scratch/bench_hermes_results.jsonl`` which the dashboard's
+    Benchmarks tab reads via ``/api/benchmarks``.
+
+    Failures are logged loudly but never raised — this runs from a
+    FastAPI BackgroundTask, the request has already returned 200.
+    """
+    import subprocess
+    repo_root = Path(__file__).resolve().parent.parent  # cognitive-os/
+    script = repo_root / "scripts" / "bench_hermes.py"
+    if not script.exists():
+        print(f"[BENCH-RUNNER] bench script missing: {script}")
+        return
+    try:
+        print(f"[BENCH-RUNNER] benching new model: {model_key}")
+        result = subprocess.run(
+            [sys.executable, str(script), model_key],
+            cwd=str(repo_root),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=600,  # 10-minute hard ceiling per bench
+        )
+        if result.returncode == 0:
+            print(f"[BENCH-RUNNER] ✅ {model_key} baseline recorded")
+        else:
+            print(
+                f"[BENCH-RUNNER] ⚠️ {model_key} bench exited "
+                f"{result.returncode}: {result.stderr.strip()[:300]}"
+            )
+    except subprocess.TimeoutExpired:
+        print(f"[BENCH-RUNNER] ❌ {model_key} timed out (>10min)")
+    except Exception as exc:  # noqa: BLE001
+        print(f"[BENCH-RUNNER] ❌ {model_key} failed: {exc!r}")
+
+
 @app.post("/api/catalog/refresh")
-async def refresh_catalog():
-    """Force the loader to re-scan the LM Studio catalog (after new download)."""
+async def refresh_catalog(
+    background_tasks: BackgroundTasks,
+    bench_new: bool = False,
+):
+    """Force the loader to re-scan the LM Studio catalog (after new download).
+
+    When ``bench_new=true`` is passed, any model_keys that are present
+    after the refresh but were not present before get scheduled as a
+    background bench-runner job (A7 of DEV-…-B5D5C0DE). Returns the
+    list of new keys so the dashboard can show "benching now…" badges.
+    """
     loader = _shared_loader()
 
-    def _refresh():
+    def _refresh_and_diff() -> tuple[list[str], list[str]]:
+        # Snapshot the existing catalog first so we know what's new.
+        before = set(loader._downloaded_cache.keys()) if loader._downloaded_cache else set()
         cache = loader.refresh_catalog()  # returns dict[model_key, raw]
-        return sorted(cache.keys())
+        after = set(cache.keys())
+        return sorted(after), sorted(after - before)
 
-    keys = await asyncio.to_thread(_refresh)
-    return {"count": len(keys), "model_keys": keys}
+    keys, new_keys = await asyncio.to_thread(_refresh_and_diff)
+
+    if bench_new:
+        for mk in new_keys:
+            background_tasks.add_task(_bench_new_model, mk)
+
+    return {
+        "count": len(keys),
+        "model_keys": keys,
+        "new_keys": new_keys,
+        "benching": new_keys if bench_new else [],
+    }
 
 
 @app.get("/api/lmstudio/logs")
@@ -726,7 +802,7 @@ class PromptRequest(BaseModel):
     source_file_path: Optional[str] = None
 
 @app.post("/api/process")
-def process_prompt(request: PromptRequest):
+async def process_prompt(request: PromptRequest):
     """
     Receives a prompt from Obsidian or other interfaces,
     runs the Cognitive OS, and routes the synthesis via OutputRouter.
@@ -735,7 +811,7 @@ def process_prompt(request: PromptRequest):
     
     try:
         # 1. Run Council
-        result = orchestrator.process_request(
+        result = await orchestrator.process_request(
             request.prompt, 
             image_base64=request.image_base64,
             compass_weight=request.compass_weight,
@@ -1028,8 +1104,8 @@ def get_sync_history(limit: int = 10):
 # Kanban Migration API (ARCH-20260522-205800-DA5B0A2D, A3)
 # ----------------------------------------------------------------------------
 # SQLite is now the single source of truth for board state. The vault
-# Dev-KanBan.md becomes a one-way render mirror (regenerated after every
-# successful transition via ``kanban_renderer.write_vault_mirror``).
+# Dashboard at http://127.0.0.1:5000 is the only board editor; the
+# vault Dev-KanBan.md mirror was deleted 2026-05-26 (zero purpose).
 #
 # Endpoints:
 #   GET  /api/kanban/board               -> current BoardSnapshot
@@ -1080,21 +1156,11 @@ class TransitionRequestPayload(BaseModel):
     archive_hash: Optional[str] = None
 
 
-async def _render_vault_mirror_safely() -> Optional[str]:
-    """Render the current board to the vault. Best-effort.
-
-    Mirror failures are non-fatal — the SQLite state is authoritative and
-    a stale ``Dev-KanBan.md`` is a cosmetic glitch, not a data-loss event.
-    We return the path written (as a string) on success, or ``None`` on
-    failure, so callers can include it in their response payload.
-    """
-    try:
-        snap = await kanban_store.get_board()
-        path = await asyncio.to_thread(write_vault_mirror, snap)
-        return str(path)
-    except Exception as exc:  # noqa: BLE001 — defensive at the API edge
-        print(f"[KANBAN MIRROR] Failed to render vault mirror: {exc!r}")
-        return None
+# NB: the vault-mirror render path (kanban_renderer.write_vault_mirror) was
+# deleted 2026-05-26. SQLite is the single source of truth; the dashboard at
+# http://127.0.0.1:5000 is the only board editor. The vault Dev-KanBan.md
+# served no purpose post-watcher-removal — it was a read-only mirror nobody
+# could act on.
 
 
 @app.get("/api/kanban/board")
@@ -1129,11 +1195,9 @@ async def add_kanban_card(req: AddCardRequest):
     except KanbanStoreError as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
-    vault_path = await _render_vault_mirror_safely()
     return {
         "status": "success",
         "card": card.to_dict(),
-        "vault_mirror": vault_path,
     }
 
 
@@ -1143,26 +1207,341 @@ async def add_kanban_card(req: AddCardRequest):
 #: so drag-drop into Beta/Alpha lands on ``planning`` automatically
 #: while substatus-dropdown changes (which DO supply a value) are
 #: untouched.
+#:
+#: ``proposal`` → ``pending_council``: card just landed, the severity
+#:   dispatcher is running. The dispatcher overwrites this to
+#:   ``approved`` / ``rejected`` / ``auto-approved`` when it finishes.
+#:
+#: ``backlog`` is intentionally absent: a card moved back to backlog
+#:   after a REJECTED verdict KEEPS its ``rejected`` substatus so the
+#:   board still flags "needs rework".
 _DEFAULT_SUBSTATUS_ON_ENTRY = {
+    "proposal": "pending_council",
     "beta testing": "planning",
     "alpha polish": "planning",
 }
 
 
+# ----------------------------------------------------------------------------
+# Phase-transition automation (kills the deprecated kanban_processor watcher)
+# ----------------------------------------------------------------------------
+# When a card enters the `proposal` column we dispatch a council based on the
+# card's severity, then record the verdict in ``approval_log`` so the
+# proposal → beta_testing drag can gate on it. When the card then enters
+# `beta_testing` we run the dev_beta_council role and produce a handoff doc.
+#
+# All council work runs in a FastAPI BackgroundTask so the HTTP response
+# stays sub-second; the dashboard polls /api/kanban/board for the result.
+# ----------------------------------------------------------------------------
+
+def _read_proposal_text(proposal_id: str) -> Optional[str]:
+    """Return the markdown body of the backend proposal file, or None.
+
+    Looks up the file by id-suffix match in ``dev/proposals/``. We don't
+    fall back to the vault here — the backend is authoritative for the
+    council inputs (the vault may contain a stale render).
+    """
+    return None if _proposal_path(proposal_id) is None else _proposal_path(proposal_id).read_text(encoding="utf-8")
+
+
+def _proposal_path(proposal_id: str) -> Optional[Path]:
+    """Resolve the backend proposal file Path for ``proposal_id`` or None."""
+    if not PROPOSALS_DIR.exists():
+        return None
+    for entry in PROPOSALS_DIR.iterdir():
+        if entry.is_file() and entry.suffix.lower() == ".md" and proposal_id in entry.name:
+            return entry
+    return None
+
+
+def _append_verdict_to_proposal(
+    proposal_id: str,
+    decision: str,
+    reasoning_excerpt: str,
+    council_name: str,
+    log_path: Optional[Path],
+) -> None:
+    """Append a Council Verdict section to the backend proposal file.
+
+    The same proposal can be revised and re-reviewed; we append, never
+    overwrite, so the proposal preserves a full audit trail visible in
+    the vault (via the existing ProposalSyncManager mirror).
+    """
+    path = _proposal_path(proposal_id)
+    if path is None:
+        print(f"[VERDICT] cannot append: no proposal file for {proposal_id!r}")
+        return
+    ts = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+    emoji = {"APPROVED": "✅", "REJECTED": "❌", "AUTO-APPROVED": "🟢"}.get(decision, "🏛")
+    section = [
+        "",
+        f"## {emoji} Council Verdict — {ts} ({council_name})",
+        f"**Decision:** `{decision}`",
+        "",
+        "**Reasoning excerpt:**",
+        "",
+    ]
+    excerpt = (reasoning_excerpt or "").strip()
+    if len(excerpt) > 800:
+        excerpt = excerpt[:800].rsplit(" ", 1)[0] + " …"
+    if excerpt:
+        for line in excerpt.splitlines() or [excerpt]:
+            section.append(f"> {line}")
+    else:
+        section.append("> _(no reasoning provided)_")
+    if log_path is not None:
+        section += ["", f"[Full verdict log →]({log_path.as_posix()})"]
+    section += ["", "---", ""]
+    try:
+        with path.open("a", encoding="utf-8") as f:
+            f.write("\n".join(section))
+        print(f"[VERDICT] appended {decision} to {path.name}")
+    except OSError as exc:
+        print(f"[VERDICT] failed to append to {path}: {exc!r}")
+
+
+def _trigger_vault_sync() -> None:
+    """Push the backend proposal updates into the vault. Best-effort."""
+    try:
+        sync_manager.sync_backend_to_vault()
+    except Exception as exc:  # noqa: BLE001
+        print(f"[VERDICT] vault sync failed: {exc!r}")
+
+
+def _dispatch_proposal_council(proposal_id: str, severity: Optional[str]) -> None:
+    """Run the severity-appropriate council and record the verdict.
+
+    Severity policy (locked 2026-05-26):
+      * ``high``    → Sequential Boardroom (board_strategist..chairman)
+      * ``medium``  → Technical Meeting (technical_specialist..overseer)
+      * ``low``     → no council; auto-APPROVE
+      * unknown/None → treat as ``medium`` (safe default)
+
+    Side-effects:
+      1. Council output is written via the orchestrator's OutputRouter
+         (so a markdown verdict lands in dev/decisions/ or AI-Help).
+      2. An ``approval_log`` row is written with ``role='proposal_council'``
+         and ``decision`` ∈ {APPROVED, REJECTED, AUTO-APPROVED}. The
+         proposal → beta_testing gate reads this row.
+      3. The card's ``substatus`` is updated to ``approved`` /
+         ``rejected`` / ``auto-approved`` so the dashboard shows the
+         verdict at a glance.
+
+    Failures are logged loudly but never raised — the dashboard already
+    returned 200, this is a background task.
+    """
+    sev_norm = (severity or "medium").strip().lower()
+    proposal_text = _read_proposal_text(proposal_id) or ""
+
+    user_input = (
+        f"Review proposal {proposal_id} for approval.\n\n"
+        f"Severity: {sev_norm}\n\n"
+        f"Your verdict MUST contain ONE of these literal lines on its own:\n"
+        f"  VERDICT: APPROVED\n"
+        f"  VERDICT: REJECTED\n\n"
+        f"Followed by reasoning. Proposal content follows:\n\n"
+        f"---\n{proposal_text}\n---\n"
+    )
+
+    decision = "AUTO-APPROVED"
+    substatus = "auto-approved"
+    report: Optional[str] = None
+    report_text = ""
+    council_name = "auto-dispatcher"
+
+    try:
+        if sev_norm == "low":
+            council_name = "auto-dispatcher"
+            ApprovalLogger().log_approval(
+                proposal_id=proposal_id,
+                phase="proposal_council",
+                status="AUTO-APPROVED",
+                approver="severity_dispatcher",
+                reason="low severity bypasses the council",
+            )
+        else:
+            if sev_norm == "high":
+                council_name = "Sequential Boardroom"
+                report = orchestrator.execute_sequential_boardroom(user_input=user_input)
+            else:  # medium / unknown
+                council_name = "Technical Meeting"
+                report = orchestrator.execute_technical_meeting(user_input=user_input)
+
+            # `report` may be a Path (output_router-routed) or str.
+            report_text = report.read_text(encoding="utf-8") if isinstance(report, Path) else (report or "")
+            decision = "APPROVED" if "VERDICT: APPROVED" in report_text else (
+                "REJECTED" if "VERDICT: REJECTED" in report_text else "APPROVED"
+            )
+            substatus = decision.lower()
+            ApprovalLogger().log_approval(
+                proposal_id=proposal_id,
+                phase="proposal_council",
+                status=decision,
+                approver=("sequential_boardroom" if sev_norm == "high" else "technical_meeting"),
+                reason=f"council verdict on severity={sev_norm}",
+                decision_log_path=str(report) if isinstance(report, Path) else None,
+            )
+
+        # Stale-card guard: if the user moved the card OUT of `proposal`
+        # while the council was running, our write-back becomes noise.
+        # Skip the verdict-append + substatus update so the board reflects
+        # the user's latest intent. The approval_log row still stands as
+        # evidence the council ran, so a future re-entry into Proposal
+        # (which re-fires the dispatcher) will overwrite it cleanly.
+        try:
+            current_card = asyncio.run(kanban_store.get_card(proposal_id))
+        except Exception as exc:  # noqa: BLE001
+            print(f"[DISPATCH] post-council card lookup failed: {exc!r}")
+            current_card = None
+        if current_card is not None and current_card.column_name != "proposal":
+            print(
+                f"[DISPATCH] {proposal_id}: card moved to "
+                f"{current_card.column_name!r} during council run; "
+                f"skipping verdict-append + substatus update"
+            )
+            return
+
+        # Append a Council Verdict section to the proposal file so the
+        # user (and the synced vault note) can read the reasoning inline.
+        log_path = report if isinstance(report, Path) else None
+        if decision == "AUTO-APPROVED":
+            _append_verdict_to_proposal(
+                proposal_id,
+                decision,
+                f"Severity={sev_norm}; auto-approved without council review.",
+                council_name,
+                log_path,
+            )
+        else:
+            _append_verdict_to_proposal(
+                proposal_id, decision, report_text, council_name, log_path
+            )
+
+        # Push the proposal change into the vault so Obsidian sees it.
+        _trigger_vault_sync()
+
+        # Update card substatus so the dashboard reflects the verdict.
+        try:
+            asyncio.run(_update_card_substatus(proposal_id, substatus))
+        except RuntimeError:
+            # Already in a loop (shouldn't happen — BackgroundTasks run
+            # threaded). Fall through to async helper.
+            pass
+
+        print(f"[DISPATCH] {proposal_id} severity={sev_norm} → {decision}")
+    except Exception as exc:  # noqa: BLE001 — background task; never raise
+        import traceback
+        print(f"[DISPATCH][ERROR] {proposal_id}: {exc!r}\n{traceback.format_exc(limit=4)}")
+        try:
+            ApprovalLogger().log_approval(
+                proposal_id=proposal_id,
+                phase="proposal_council",
+                status="ERROR",
+                approver="severity_dispatcher",
+                reason=f"{type(exc).__name__}: {exc}",
+            )
+        except Exception:
+            pass
+        try:
+            asyncio.run(_update_card_substatus(proposal_id, "council_error"))
+        except Exception:
+            pass
+
+
+async def _update_card_substatus(proposal_id: str, substatus: str) -> None:
+    """Async helper to update a card's substatus in the kanban store."""
+    try:
+        await kanban_store.update_card(proposal_id, {"substatus": substatus})
+    except Exception as exc:  # noqa: BLE001
+        print(f"[DISPATCH] failed to update substatus for {proposal_id}: {exc!r}")
+
+
+def _proposal_is_approved(proposal_id: str) -> bool:
+    """Return True if approval_log has an APPROVED / AUTO-APPROVED row for
+    the proposal_council phase of this proposal."""
+    try:
+        logger = ApprovalLogger()
+        conn = sqlite3.connect(str(logger.db_path))
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT decision FROM approval_log "
+                "WHERE proposal_id = ? AND role = 'proposal_council' "
+                "ORDER BY id DESC LIMIT 1",
+                (proposal_id,),
+            )
+            row = cur.fetchone()
+        finally:
+            conn.close()
+    except Exception as exc:  # noqa: BLE001
+        print(f"[GATE] approval_log read failed for {proposal_id}: {exc!r}")
+        return False
+    if not row:
+        return False
+    decision = (row[0] or "").upper()
+    return decision.startswith("APPROVED") or decision.startswith("AUTO-APPROVED")
+
+
+def _run_beta_council_and_handoff(proposal_id: str) -> None:
+    """Run dev_beta_council on the proposal, then write the beta handoff.
+
+    Executes inside a BackgroundTask after a successful proposal→beta_testing
+    transition. Never raises.
+    """
+    try:
+        proposal_text = _read_proposal_text(proposal_id) or ""
+        user_input = (
+            f"Review proposal {proposal_id} as the Beta Council. Produce a JSON "
+            f"engineering plan per your role spec.\n\n---\n{proposal_text}\n---\n"
+        )
+        # The Beta Council is a single dedicated role (dev_beta_council).
+        # We run a one-shot Technical Meeting so the orchestration plumbing
+        # (memory, brand-guard, scribe) still kicks in.
+        report = orchestrator.execute_technical_meeting(user_input=user_input)
+        report_text = report.read_text(encoding="utf-8") if isinstance(report, Path) else (report or "")
+
+        from src.dev_route import DevRouteManager
+        result = DevRouteManager().generate_beta_handoff(proposal_id, report_text)
+        if "error" in result:
+            print(f"[BETA] handoff generation FAILED for {proposal_id}: {result['error']}")
+        else:
+            print(f"[BETA] handoff written: {result.get('filename')}")
+    except Exception as exc:  # noqa: BLE001
+        import traceback
+        print(f"[BETA][ERROR] {proposal_id}: {exc!r}\n{traceback.format_exc(limit=4)}")
+
+
 @app.post("/api/workflow/transition")
-async def transition_card(req: TransitionRequestPayload):
+async def transition_card(req: TransitionRequestPayload, background_tasks: BackgroundTasks):
     """Move a card to a target column / substatus.
 
-    Successful moves trigger a vault-mirror render so the Obsidian view
-    stays current. Mirror failures do NOT roll back the SQLite write -
-    the state store is the single source of truth.
+    Post-commit hooks fire as FastAPI BackgroundTasks (kept off the request
+    path so the dashboard returns immediately):
 
-    When the caller omits ``target_substatus`` AND the destination column
-    is in ``_DEFAULT_SUBSTATUS_ON_ENTRY``, we seed the substatus so the
-    micro-lifecycle starts in 'planning' instead of None.
+      * ``proposal``     → severity-dispatched council records APPROVED /
+                           REJECTED / AUTO-APPROVED in ``approval_log``.
+      * ``beta_testing`` → ``dev_beta_council`` produces a handoff doc.
+
+    A drag into ``beta_testing`` is REJECTED with 422 unless the latest
+    ``approval_log`` row for this proposal is APPROVED or AUTO-APPROVED.
+
+    Successful moves trigger a vault-mirror render so the Obsidian view
+    stays current. Mirror failures do NOT roll back the SQLite write —
+    the state store is the single source of truth.
     """
-    # Don't overwrite an in-column substatus tweak (where dashboard *does*
-    # send target_substatus). Only seed when caller is silent.
+    # ---- Approval gate: proposal → beta_testing requires council APPROVED.
+    if req.target_column == "beta testing":
+        if not _proposal_is_approved(req.proposal_id):
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"Cannot move {req.proposal_id} to Beta Testing: the "
+                    f"proposal-stage council has not APPROVED this proposal "
+                    f"(check dev/decisions/ or wait for the dispatcher to finish)."
+                ),
+            )
+
+    # ---- Substatus seeding (planning on entry to beta/alpha).
     effective_substatus = req.target_substatus
     if effective_substatus is None:
         effective_substatus = _DEFAULT_SUBSTATUS_ON_ENTRY.get(req.target_column)
@@ -1188,11 +1567,17 @@ async def transition_card(req: TransitionRequestPayload):
     except KanbanStoreError as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
-    vault_path = await _render_vault_mirror_safely()
+    # ---- Schedule post-commit hooks (fire-and-forget; survive HTTP 200).
+    if req.target_column == "proposal":
+        background_tasks.add_task(
+            _dispatch_proposal_council, card.proposal_id, card.severity
+        )
+    elif req.target_column == "beta testing":
+        background_tasks.add_task(_run_beta_council_and_handoff, card.proposal_id)
+
     return {
         "status": "success",
         "card": card.to_dict(),
-        "vault_mirror": vault_path,
     }
 
 
@@ -1240,45 +1625,97 @@ async def rollback_transition(proposal_id: str, approver: str = "dashboard"):
     except KanbanStoreError as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
-    vault_path = await _render_vault_mirror_safely()
     return {
         "status": "success",
         "rolled_back_to": prior_column,
         "card": card.to_dict(),
-        "vault_mirror": vault_path,
     }
 
 
 @app.get("/api/workflow/state/{proposal_id}")
-async def get_workflow_state(proposal_id: str, history_limit: int = 10):
-    """Return the card + its most recent transitions (default last 10).
+async def get_workflow_state(proposal_id: str, history_limit: Optional[int] = 10):
+    """Get the full state for a proposal, including recent history."""
+    try:
+        card = await kanban_store.get_card(proposal_id)
+        if not card:
+            raise HTTPException(status_code=404, detail=f"Card with proposal_id='{proposal_id}' not found")
 
-    Used by the dashboard's "history drawer" per the proposal spec.
-    Pass ``?history_limit=0`` to get only the card without history;
-    ``?history_limit=`` (omitted) defaults to 10.
-    """
-    card = await kanban_store.get_card(proposal_id)
-    if card is None:
-        raise HTTPException(
-            status_code=404,
-            detail=f"No card found for proposal_id={proposal_id!r}",
-        )
+        history = await kanban_store.history(proposal_id, limit=history_limit)
+        return {
+            "card": card.to_dict(),
+            "history": [t.to_dict() for t in history],
+            "history_count": len(history),
+        }
+    except KanbanStoreError as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
-    limit = history_limit if history_limit > 0 else None
-    history = await kanban_store.history(proposal_id, limit=limit)
-    return {
-        "card": card.to_dict(),
-        "history": [t.to_dict() for t in history],
-        "history_count": len(history),
-    }
+
+class UpdateCardRequest(BaseModel):
+    title: Optional[str] = None
+    substatus: Optional[str] = None
+    severity: Optional[str] = None
+    origin: Optional[str] = None
+
+
+@app.put("/api/kanban/cards/{proposal_id}")
+async def update_kanban_card(proposal_id: str, request: UpdateCardRequest):
+    """Update fields on an existing Kanban card."""
+    updates = request.model_dump(exclude_none=True)
+    if not updates:
+        raise HTTPException(status_code=400, detail="No update fields provided")
+
+    try:
+        updated_card = await kanban_store.update_card(proposal_id, updates)
+        return {"status": "success", "card": updated_card.to_dict()}
+    except CardNotFound:
+        raise HTTPException(status_code=404, detail=f"Card with proposal_id='{proposal_id}' not found")
+    except (KanbanStoreError, ValueError) as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/kanban/cards/{proposal_id}")
+async def get_kanban_card(proposal_id: str):
+    """Get a specific Kanban card."""
+    try:
+        card = await kanban_store.get_card(proposal_id)
+        if not card:
+            raise HTTPException(status_code=404, detail=f"Card with proposal_id='{proposal_id}' not found")
+        return {"card": card.to_dict()}
+    except KanbanStoreError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/kanban/cards/{proposal_id}/history")
+async def get_kanban_card_history(proposal_id: str, limit: Optional[int] = 10):
+    """Get the history of a specific card."""
+    try:
+        history = await kanban_store.history(proposal_id, limit=limit)
+        return {"history": [t.to_dict() for t in history]}
+    except KanbanStoreError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/kanban/cards/{proposal_id}")
+async def delete_kanban_card(proposal_id: str):
+    """Delete a card and its history from the Kanban store."""
+    try:
+        deleted = await kanban_store.delete_card(proposal_id)
+        if not deleted:
+            raise HTTPException(status_code=404, detail=f"Card with proposal_id='{proposal_id}' not found")
+        return {
+            "status": "success",
+            "message": "Card deleted successfully",
+            "proposal_id": proposal_id,
+        }
+    except KanbanStoreError as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # Mount the static directory for the dashboard AFTER all other API routes
 app.mount("/", StaticFiles(directory=DASHBOARD_DIR, html=True), name="static")
 
-def main():
-    print("🌐 Starting FastAPI Server on port 5000...")
-    uvicorn.run("src.api:app", host="0.0.0.0", port=5000, reload=True)
 
 if __name__ == "__main__":
-    uvicorn.run("src.api:app", host="0.0.0.0", port=5000)
+    # Launched via `python -m src.api` from start_services.bat. Port 5000
+    # matches the dashboard's API_BASE convention.
+    uvicorn.run(app, host="0.0.0.0", port=5000)

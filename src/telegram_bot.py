@@ -175,33 +175,47 @@ def main():
         
         await update.message.reply_text(f"🚀 Starting Development Lifecycle for:\n_{user_input}_", parse_mode="Markdown")
         
-        # Start dev lifecycle workflow
+        # Start dev lifecycle workflow.
+        #
+        # 2026-05-26: this used to call ``orchestrator.execute_development_lifecycle``
+        # which never existed — silent latent bug. The right path is to delegate
+        # to DevRouteManager.process_dev_proposal: it writes the backend proposal
+        # file, mirrors it to the vault, AND adds the card to the SQLite kanban
+        # store (so the dashboard picks it up immediately).
         def run_dev_lifecycle():
             try:
                 def progress_callback(msg):
                     asyncio.run_coroutine_threadsafe(
                         context.bot.send_message(chat_id=chat_id, text=msg),
-                        loop
+                        loop,
                     )
-                
-                result = orchestrator.execute_development_lifecycle(user_input, progress_callback=progress_callback)
 
-                # Dev proposals go to dev/proposals via DevRouteManager, NOT to AI-Help/cognitive-os
-                # No need to write to Obsidian vault here
+                from src.dev_route import DevRouteManager
+                dev_manager = DevRouteManager()
+                result = dev_manager.process_dev_proposal(
+                    user_input=user_input,
+                    origin="telegram",
+                )
 
-                if len(result) > 4000:
-                    chunks = [result[i:i+4000] for i in range(0, len(result), 4000)]
-                    for chunk in chunks: progress_callback(chunk)
-                else:
-                    progress_callback(result)
-                    
-                progress_callback("✅ Development lifecycle complete! Proposal saved to Obsidian.")
-                
-            except Exception as e:
+                pid = result.get("proposal_id", "?")
+                progress_callback(
+                    f"✅ Proposal {pid} created and added to the Backlog.\n"
+                    f"Open the dashboard at http://127.0.0.1:5000/ and drag "
+                    f"the card to Proposal to trigger the council."
+                )
+
+            except Exception:
                 import traceback
                 error_msg = f"❌ Dev Lifecycle Error:\n```\n{traceback.format_exc()}\n```"
-                progress_callback(error_msg)
-        
+                # progress_callback may not exist yet if the import failed; use a fallback.
+                try:
+                    progress_callback(error_msg)
+                except Exception:
+                    asyncio.run_coroutine_threadsafe(
+                        context.bot.send_message(chat_id=chat_id, text=error_msg),
+                        loop,
+                    )
+
         chat_id = update.effective_chat.id
         loop = asyncio.get_running_loop()
         await asyncio.to_thread(run_dev_lifecycle)

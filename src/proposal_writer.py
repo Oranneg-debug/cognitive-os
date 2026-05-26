@@ -10,7 +10,9 @@ import re
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict
+import requests
+import json
 
 from src.paths import (
     VAULT_ROOT,
@@ -18,7 +20,6 @@ from src.paths import (
     HANDOFFS_DIR,
     RELEASES_DIR,
     TEMPLATES_DIR,
-    KANBAN_FILE,
 )
 
 # Governance Foundation imports
@@ -186,11 +187,25 @@ class ProposalWriter:
         # Extract a human-readable title for the Kanban card metadata
         card_title = self._extract_card_title(user_input)
 
-        # Auto-add card to Kanban Board in vault (OUTSIDE UoW per A4 design)
-        self._add_card_to_kanban(proposal_id, card_title, kanban_card_id, source_note=source_note)
+        # Severity priority:
+        #   1. explicit YAML frontmatter (e.g. ARCH/NLST agents set this)
+        #   2. SentryRouter._assess_complexity() on the raw user_input —
+        #      keyword heuristics that already exist in the router and map
+        #      cleanly to high/medium/low. Free, instant, no LLM call.
+        #   3. fallback: "medium" (safe default Technical Meeting).
+        severity = self._extract_severity_from_frontmatter(content)
+        if severity is None:
+            try:
+                from src.sentry_router import SentryRouter
+                complexity, _ = SentryRouter()._assess_complexity(user_input)
+                severity = complexity  # already 'low'/'medium'/'high'
+            except Exception as exc:
+                print(f"[ProposalWriter] sentry severity-classification failed: {exc!r}")
+                severity = "medium"
 
-        # Add card to SQLite kanban store for dashboard
-        self._add_card_to_store(proposal_id, prefix, card_title, origin)
+        # Add card to SQLite kanban store (single source of truth — the
+        # vault Dev-KanBan.md mirror was deleted 2026-05-26).
+        self._add_card_to_store(proposal_id, prefix, card_title, origin, severity)
 
         proposal_data = {
             "proposal_id": proposal_id,
@@ -233,84 +248,34 @@ class ProposalWriter:
                 return line[:80]
         return ""
 
-    def _add_card_to_kanban(
-        self,
-        proposal_id: str,
-        title: str,
-        card_id: str,
-        source_note: str = None
-    ) -> bool:
+    @staticmethod
+    def _extract_severity_from_frontmatter(content: str) -> str | None:
+        """Return ``severity`` value from a proposal's YAML frontmatter, or None.
+
+        We do a tiny regex scan instead of full YAML parse — frontmatter
+        shape varies and we only care about one field.
         """
-        Add a new proposal card to the Kanban Board.md file.
-
-        Args:
-            proposal_id: The ID of the proposal
-            title: Short title for the card
-            card_id: The Kanban card ID
-            source_note: Optional Obsidian note name that originated this proposal
-
-        Returns:
-            True if successful, False otherwise
-        """
-        try:
-            # Build path to Kanban board in vault safely by going up two directories
-            seedlings_dir = VAULT_ROOT / "1. P - Seedlings"
-            kanban_path = str(seedlings_dir / "Dev-KanBan.md")
-
-            # Check if file exists, create if not
-            if not os.path.exists(kanban_path):
-                os.makedirs(os.path.dirname(kanban_path), exist_ok=True)
-                with open(kanban_path, 'w', encoding='utf-8') as f:
-                    f.write(self._get_kanban_template())
-
-            # Read current board content
-            with open(kanban_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-
-            # Check if card already exists
-            if card_id in content:
-                return True
-
-            current_hour = datetime.now().strftime('%H:%M')
-
-            # Build metadata lines — title first, then standard fields
-            meta_lines = ""
-            if title and title != proposal_id:
-                meta_lines += f"  - title: {title}\n"
-            meta_lines += (
-                f"  - status: backlog\n"
-                f"  - priority: medium\n"
-                f"  - created: {datetime.now().strftime('%Y-%m-%d')} at {current_hour}\n"
-                f"  - related: [[{proposal_id}_PROPOSAL]]\n"
-            )
-            if source_note:
-                meta_lines += f"  - source: [[{source_note}]]\n"
-
-            # Always use the DEV ID on the card title line so ID-based lookup keeps working
-            card_entry = f"\n- [ ] {proposal_id}{card_id}\n{meta_lines}"
-
-            # Find Backlog section and add card
-            backlog_marker = "## Backlog"
-            if backlog_marker in content:
-                content = content.replace(backlog_marker, backlog_marker + "\n" + card_entry)
-            else:
-                content += "\n\n## Backlog\n" + card_entry
-
-            with open(kanban_path, 'w', encoding='utf-8') as f:
-                f.write(content)
-
-            return True
-
-        except Exception as e:
-            print(f"Warning: Could not update Kanban board: {e}")
-            return False
+        # Limit search to the frontmatter block (between the first two ---).
+        if not content.startswith('---'):
+            return None
+        end = content.find('\n---\n', 3)
+        if end < 0:
+            return None
+        block = content[3:end]
+        m = re.search(r'^\s*severity:\s*["\']?(\w+)["\']?\s*$', block, re.MULTILINE)
+        if not m:
+            return None
+        sev = m.group(1).strip().lower()
+        # Only accept the three values the dispatcher knows.
+        return sev if sev in ('high', 'medium', 'low') else None
 
     def _add_card_to_store(
         self,
         proposal_id: str,
         prefix: str,
         title: str,
-        origin: str
+        origin: str,
+        severity: str | None = None,
     ) -> bool:
         """
         Add a new proposal card to the SQLite kanban store (for dashboard).
@@ -336,13 +301,13 @@ class ProposalWriter:
                 asyncio.run(kanban_store.add_card(
                     proposal_id=proposal_id,
                     prefix=prefix,
-                    column_name="Backlog",
+                    column_name="backlog",
                     title=title or None,
                     substatus=None,
-                    severity="BACKLOG",
+                    severity=severity,
                     origin=origin or "unknown",
                     approver="system",
-                    reason="Proposal created"
+                    reason="Proposal created",
                 ))
             
             thread = threading.Thread(target=_add_in_thread, daemon=True)
@@ -362,33 +327,6 @@ class ProposalWriter:
             traceback.print_exc()
             return False
 
-    def _get_kanban_template(self) -> str:
-        """Return default Kanban Board template."""
-        return """---
-
-kanban-plugin: basic
-
----
-
-## Backlog
-
-## Proposal
-
-## Beta Testing
-
-## Alpha Polish
-
-## Finalized
-
-## Deployed
-
-***
-
-## Archive
-
-- [ ] Placeholder Task (Delete me)
-"""
-
     def sync_proposals(self) -> Dict:
         """
         Sync proposals from backend to vault.
@@ -407,19 +345,18 @@ kanban-plugin: basic
                     return {
                         "success": True,
                         "message": f"Synced {result_dict['files_synced']} files",
-                        "details": result_dict
+                        "details": result_dict,
                     }
-                else:
-                    return {
-                        "success": False,
-                        "message": f"Sync completed with errors: {result_dict['errors']}",
-                        "details": result_dict
-                    }
+                return {
+                    "success": False,
+                    "message": f"Sync completed with errors: {result_dict.get('errors')}",
+                    "details": result_dict,
+                }
         except Exception as e:
             return {
                 "success": False,
                 "message": f"Sync failed: {str(e)}",
-                "error": str(e)
+                "error": str(e),
             }
 
         return {"success": False, "message": "Sync manager unavailable"}
