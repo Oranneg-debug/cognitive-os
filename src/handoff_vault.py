@@ -25,10 +25,11 @@ from src.workflow_models import (
     VaultIntegrityError,
 )
 
+from src.paths import DEV_DIR
 
 # Configuration
-ARCHIVES_DIR = Path("dev/.archives")
-DB_PATH = Path("dev/.archives/vault_index.sqlite")
+ARCHIVES_DIR = DEV_DIR / ".archives"
+DB_PATH = DEV_DIR / ".archives" / "vault_index.sqlite"
 
 
 class HandoffVault:

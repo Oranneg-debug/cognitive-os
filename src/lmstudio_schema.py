@@ -49,21 +49,14 @@ class GpuSettingIn(BaseModel):
         default=None, ge=0,
         description="Index of the GPU to prefer for single-GPU workloads.",
     )
-    split: Optional[list[float]] = Field(
+    split_strategy: Optional[Literal["evenly", "favorMainGpu"]] = Field(
         default=None,
-        description="Tensor split across multiple GPUs, e.g. [0.5, 0.5].",
+        description="Strategy for splitting the model across multiple GPUs.",
     )
-
-    @field_validator("split")
-    @classmethod
-    def _split_sums_to_one(cls, v: list[float] | None) -> list[float] | None:
-        if v is None:
-            return v
-        if not all(0.0 <= f <= 1.0 for f in v):
-            raise ValueError("split entries must each be in [0.0, 1.0]")
-        if abs(sum(v) - 1.0) > 0.01:
-            raise ValueError(f"split entries must sum to ~1.0, got {sum(v):.3f}")
-        return v
+    disabled_gpus: Optional[list[int]] = Field(
+        default=None,
+        description="List of GPU indices to ignore.",
+    )
 
 
 class LoadConfigIn(BaseModel):

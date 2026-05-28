@@ -220,7 +220,8 @@ class HandoffWriter:
         # (reused below in the Beta Testing section append AND passed to
         # the planner so it can read the proposal body)
         # ----------------------------------------------------------------
-        proposals_dir = proposals_dir or "dev/proposals"
+        from src.paths import PROPOSALS_DIR
+        proposals_dir = proposals_dir or str(PROPOSALS_DIR)
         vault_proposals_dir = str(VAULT_ROOT / "1. P - Seedlings" / "dev" / "proposals")
 
         proposal_file = None
@@ -401,6 +402,18 @@ class HandoffWriter:
         # ----------------------------------------------------------------
         # Extract sections from the council report
         # ----------------------------------------------------------------
+        
+        # FIX: The orchestrator's output_router sometimes returns a Path object instead of a string.
+        # We must read it into a string before running regex operations.
+        from pathlib import Path
+        if isinstance(council_report, Path):
+            try:
+                council_report = council_report.read_text(encoding="utf-8")
+            except Exception as e:
+                return {"error": f"Failed to read council report path: {e}"}
+        elif not isinstance(council_report, str):
+            council_report = str(council_report)
+
         def _extract_section(report: str, *headings) -> str:
             for h in headings:
                 pattern = rf'(?:^|\n)#{1,3}\s+{re.escape(h)}[^\n]*\n(.*?)(?=\n#{1,3}\s|\Z)'
@@ -431,7 +444,8 @@ class HandoffWriter:
         # ----------------------------------------------------------------
         # Pre-lookup: kanban_card_id and source_note from proposal file
         # ----------------------------------------------------------------
-        proposals_dir = proposals_dir or "dev/proposals"
+        from src.paths import PROPOSALS_DIR
+        proposals_dir = proposals_dir or str(PROPOSALS_DIR)
         vault_proposals_dir = str(VAULT_ROOT / "1. P - Seedlings" / "dev" / "proposals")
 
         proposal_file = None

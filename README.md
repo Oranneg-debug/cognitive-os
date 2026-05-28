@@ -1,4 +1,4 @@
-# 🧠 Cognitive OS — v1.1.0
+# 🧠 Cognitive OS — v1.1.1
 
 > An offline-first, multi-agent AI orchestrator that transforms your local hardware into an automated **Sequential Boardroom**, a **visual Kanban development pipeline**, and a **browser-based Control Panel** — all powered by LM Studio.
 
@@ -6,7 +6,7 @@ It accepts prompts from your phone (Telegram), your notes (Obsidian), or a brows
 
 ---
 
-## ✨ What's New in v1.1.0
+## ✨ What's New in v1.1.1
 | Feature | Description |
 |---|---|
 | 🎛️ **Web Control Panel** | Browser-based GUI to edit all roles/models live — no JSON editing, no restart |
@@ -350,4 +350,4 @@ See [docs/SYSTEM_ARCHITECTURE.md](../docs/SYSTEM_ARCHITECTURE.md) for flow diagr
 
 ---
 
-*Cognitive OS v1.1.0 — Antigravity Development Team*
+*Cognitive OS v1.1.1 — Antigravity Development Team*

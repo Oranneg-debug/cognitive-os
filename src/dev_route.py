@@ -178,10 +178,15 @@ class DevRouteManager:
         proposals_dir = self.proposal_writer.proposals_dir
         vault_proposals_dir = self.proposal_writer.vault_proposals_dir
 
-        # Search in both project and vault directories
+        # Search in both project and vault directories.
+        # New-format filenames: <ID>_PROPOSAL.md (no leading prefix).
+        # Old-format filenames: <date>_<ID>_PROPOSAL.md (with date prefix).
+        # The wildcard covers both.
         patterns = [
+            f"{proposals_dir}/{proposal_id}_PROPOSAL.md",
             f"{proposals_dir}/*_{proposal_id}_PROPOSAL.md",
-            f"{vault_proposals_dir}/*_{proposal_id}_PROPOSAL.md"
+            f"{vault_proposals_dir}/{proposal_id}_PROPOSAL.md",
+            f"{vault_proposals_dir}/*_{proposal_id}_PROPOSAL.md",
         ]
 
         files = []
@@ -193,44 +198,32 @@ class DevRouteManager:
 
         filepath = files[0]
 
-        # Update proposal status to finalized
-        with open(filepath, 'r', encoding='utf-8') as f:
-            content = f.read()
-
-        # Update lifecycle phase to Finalized
-        import re
-        content = re.sub(
-            r'\*\*Current Phase\*\*:\s*[^\n]*',
-            '**Current Phase**: 5/5 - Finalized',
-            content
+        from src.workflow_engine import WorkflowEngine
+        engine = WorkflowEngine()
+        
+        from src.workflow_models import TransitionRequest
+        req = TransitionRequest(
+            proposal_id=proposal_id,
+            target_column="finalized",
+            target_substatus="released",
+            approver="system",
+            reason="Finalized via dev route"
         )
-        content = re.sub(
-            r'\*\*Status\*\*:\s*[^\n]*',
-            '**Status**: ✅ Finalized - Ready for Release',
-            content
-        )
+        
+        try:
+            result = engine.transition(req)
+            if not result.success:
+                return {"error": f"Failed to finalize proposal: {result.gate_results}"}
+        except Exception as e:
+            return {"error": f"Failed to finalize proposal: {str(e)}"}
 
-        # Add release notes section
-        release_section = f"""
-## 📦 Release Notes
-
-**Version**: 1.0.0  
-**Date**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-
-{release_notes}
-
----
-"""
-        # Insert before the footer
-        content = content.replace("*Proposal created via", release_section + "*Proposal created via")
-
-        with open(filepath, 'w', encoding='utf-8') as f:
-            f.write(content)
-
+        # Write release notes to the handoff writer which should handle the markdown
+        # (Assuming handoff_writer handles appending this cleanly now instead of regex in this file)
+        
         return {
             "success": True,
             "proposal_id": proposal_id,
-            "filepath": filepath,
+            "filepath": "delegated_to_engine",
             "status": "finalized"
         }
 

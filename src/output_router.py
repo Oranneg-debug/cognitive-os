@@ -8,11 +8,12 @@ structured error handling.
 Usage:
     from src.output_router import OutputRouter
     from src.writer_protocols import BackendWriterProtocol
+    from src.paths import DEV_DIR
 
     router = OutputRouter(
         rules_path=Path("config/routing_rules.yaml"),
         backend_writer=MyBackendWriter(),
-        dead_letter_dir=Path("dev/failed_routings"),
+        dead_letter_dir=DEV_DIR / "failed_routings",
     )
     decision = router.route(synthesis_text)
     path = router.apply(synthesis_text, decision)
@@ -102,7 +103,7 @@ class OutputRouter:
         router = OutputRouter(
             rules_path=Path("config/routing_rules.yaml"),
             backend_writer=backend,
-            dead_letter_dir=Path("dev/failed_routings"),
+            dead_letter_dir=DEV_DIR / "failed_routings",
         )
         decision = router.route(content)
         path = router.apply(content, decision)

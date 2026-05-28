@@ -13,7 +13,7 @@ from __future__ import annotations
 from datetime import datetime
 from enum import Enum
 from typing import Optional, List, Callable, Protocol
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 
 class Severity(str, Enum):
@@ -163,9 +163,7 @@ class ValidatedProposal(BaseModel):
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
-    class Config:
-        """Pydantic configuration."""
-        use_enum_values = True
+    model_config = ConfigDict(use_enum_values=True)
 
 
 class ArtifactVersion(BaseModel):
@@ -183,9 +181,7 @@ class ArtifactVersion(BaseModel):
     prior_hash: Optional[str] = None  # For hash chain verification
     snapshot_path: str  # Path to the actual file (not stored here)
 
-    class Config:
-        """Pydantic configuration."""
-        use_enum_values = True
+    model_config = ConfigDict(use_enum_values=True)
 
 
 class ApprovalRecord(BaseModel):

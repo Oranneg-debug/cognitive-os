@@ -28,9 +28,10 @@ from src.workflow_models import (
     VaultIntegrityError,
     ApprovalLogError,
 )
+from src.paths import DEV_DIR
 
 # Configuration
-UOW_LOG_DIR = Path("dev/.uow_log")
+UOW_LOG_DIR = DEV_DIR / ".uow_log"
 from src.handoff_vault import HandoffVault
 from src.approval_logger import ApprovalLogger
 
@@ -431,8 +432,9 @@ Prior Record Hash: {prior_hash or 'N/A'}
         
         for target_path, content, staged_path in self._files_to_commit:
             try:
-                # Atomic rename (same filesystem guaranteed by staging_dir design)
-                os.rename(staged_path, target_path)
+                # Windows os.rename() raises FileExistsError if target exists.
+                # Use os.replace() for atomic cross-platform overwrite.
+                os.replace(staged_path, target_path)
             except OSError as e:
                 raise RuntimeError(
                     f"Failed to commit file {target_path}: {e}"

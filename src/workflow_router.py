@@ -6,12 +6,13 @@ and tracks processed files via SHA256 checksums to ensure idempotency.
 
 Usage:
     from pathlib import Path
+    from src.paths import DEV_DIR
     from src.workflow_router import WorkflowRouter
     from src.output_router import OutputRouter
 
     router = WorkflowRouter(
-        watch_dir=Path("dev/reports"),
-        state_file=Path("dev/.workflow_state.json"),
+        watch_dir=DEV_DIR / "reports",
+        state_file=DEV_DIR / ".workflow_state.json",
         output_router=output_router,
     )
 

@@ -195,6 +195,10 @@
                                             <option value="IGNORE">IGNORE</option>
                                         </select>
                                     </label>
+                                    <label title="When selected, re-runs an existing proposal via its ID (e.g. DEV-YYYYMMDD-HHMMSS-123456)">
+                                        Target Proposal ID
+                                        <input type="text" id="orch-target-id" placeholder="ARCH-..., DEV-..., etc" style="width: 200px; padding: 4px; margin-left: 8px;">
+                                    </label>
                                 </div>
                             </div>
 
@@ -258,6 +262,7 @@
                                 <div class="orch-output-header">
                                     <h3>Output</h3>
                                     <div class="orch-log-controls">
+                                        <button id="rerun-orch-btn" class="log-btn" title="Re-run this orchestration">Re-run</button>
                                         <button id="clear-orch-log" class="log-btn" title="Clear current log">Clear Log</button>
                                         <button id="save-orch-log" class="log-btn" title="Save log for analysis">Save Log</button>
                                     </div>
@@ -352,12 +357,13 @@
                                         </select>
                                     </label>
 
-                                    <label class="lms-field"
-                                        title="Accepts: 'max' (all GPU), 'off' (CPU-only), or a number 0.0–1.0 (fraction on GPU). Not the llama.cpp -1 convention.">
+                                    <label class="lms-field lms-range-field"
+                                        title="GPU Offload Ratio: 0 (CPU-only) to 1 (max GPU)">
                                         <span>gpu_offload_ratio</span>
-                                        <input name="gpu_offload_ratio" type="text"
-                                            pattern="^(max|off|0(\.\d+)?|1(\.0+)?)$"
-                                            placeholder="max | off | 0.0–1.0">
+                                        <div style="display: flex; align-items: center; gap: 8px;">
+                                            <input name="gpu_offload_ratio" type="range" min="0" max="1" step="0.1" value="1" oninput="this.nextElementSibling.textContent = this.value === '1' ? 'max' : (this.value === '0' ? 'off' : this.value)">
+                                            <span style="font-family: monospace; font-size: 0.9em;">max</span>
+                                        </div>
                                     </label>
 
                                     <label class="lms-field">
@@ -508,11 +514,16 @@
                     <header class="system-header">
                         <h1>System Architecture</h1>
                         <div class="system-subtabs">
+                            <button class="system-subtab-link" data-subtab="architecture">Architecture</button>
                             <button class="system-subtab-link active" data-subtab="structure">Structure</button>
                             <button class="system-subtab-link" data-subtab="flow">Request Flow</button>
                             <button class="system-subtab-link" data-subtab="kanban">Kanban Workflow</button>
                         </div>
                     </header>
+                    
+                    <section id="system-architecture" class="system-subtab">
+                        <div class="placeholder">Loading Architecture...</div>
+                    </section>
                     
                     <section id="system-structure" class="system-subtab active">
                         <div class="placeholder">Loading System Structure...</div>
@@ -539,7 +550,20 @@
         </main>
     </div>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
-    <script>mermaid.initialize({ startOnLoad: false });</script>
+    <script>
+        mermaid.initialize({ 
+            startOnLoad: false,
+            theme: 'dark',
+            themeVariables: {
+                background: 'transparent',
+                primaryColor: '#1a1a2e',
+                primaryBorderColor: '#e94560',
+                lineColor: '#a8dadc',
+                textColor: '#fff',
+                fontFamily: 'monospace'
+            }
+        });
+    </script>
     <script src="script.js"></script>
 </body>
 </html>

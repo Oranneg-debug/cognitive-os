@@ -245,7 +245,7 @@ def _build_gpu_setting(value: Any) -> dict[str, Any] | None:
         - None  -> None (no override)
         - "max" -> {"ratio": "max"}
         - 0.85  -> {"ratio": 0.85}
-        - {"ratio": …, "split": [...], "main_gpu": …}  -> passed through
+        - {"ratio": …, "split_strategy": "evenly", "main_gpu": …, "disabled_gpus": [...]}  -> passed through
     """
     if value is None:
         return None

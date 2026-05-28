@@ -17,8 +17,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 
+from src.paths import DEV_DIR
+
 # Configuration
-UOW_LOG_DIR = Path("dev/.uow_log")
+UOW_LOG_DIR = DEV_DIR / ".uow_log"
 
 
 class UoWRecoveryError(Exception):

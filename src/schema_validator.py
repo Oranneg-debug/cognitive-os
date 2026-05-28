@@ -275,7 +275,8 @@ def run_migration(proposals_dir: Optional[Path] = None) -> dict:
     Returns:
         Migration report with counts
     """
-    proposals_dir = Path(proposals_dir) if proposals_dir else Path("dev/proposals")
+    from src.paths import PROPOSALS_DIR
+    proposals_dir = Path(proposals_dir) if proposals_dir else PROPOSALS_DIR
 
     if not proposals_dir.exists():
         return {

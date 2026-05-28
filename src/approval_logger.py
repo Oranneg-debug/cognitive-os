@@ -22,11 +22,11 @@ from src.workflow_models import (
     ApprovalRecord,
     VaultIntegrityError,
 )
-
+from src.paths import DEV_DIR
 
 # Configuration
-DECISIONS_DIR = Path("dev/decisions")
-DB_PATH = Path("dev/decisions/index.sqlite")
+DECISIONS_DIR = DEV_DIR / "decisions"
+DB_PATH = DEV_DIR / "decisions" / "index.sqlite"
 
 
 class ApprovalLogger:

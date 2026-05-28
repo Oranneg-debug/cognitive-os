@@ -424,7 +424,7 @@ document.addEventListener('DOMContentLoaded', () => {
         
         resourcesSection.appendChild(createNumberInput('max_tokens', data.max_tokens, 'Max Tokens'));
         resourcesSection.appendChild(createNumberInput('context_window', data.context_window, 'Context Window', contextHint));
-        resourcesSection.appendChild(createNumberInput('gpu_layers', data.gpu_layers, 'GPU Layers', layersHint));
+        resourcesSection.appendChild(createRangeInput('gpu_offload_ratio', data.gpu_offload_ratio !== undefined ? data.gpu_offload_ratio : "max", 'GPU Offload Ratio', '0 (CPU-only) to 1 (max GPU)', 0, 1, 0.1));
         resourcesSection.appendChild(createNumberInput('n_parallel', data.n_parallel, 'Data Parallelism (n_parallel)', 'Concurrent request handling (1-16). Note: Tensor parallelism requires LM Studio SDK configuration'));
         resourcesSection.appendChild(createNumberInput('batch_size', data.batch_size || 512, 'Batch Size', 'Number of tokens to process per batch'));
         resourcesSection.appendChild(createSelect('k_cache_quant', data.k_cache_quant || 'q8_0', 'K-Cache Quantization', ['f16', 'q8_0', 'q4_0']));
@@ -565,6 +565,55 @@ document.addEventListener('DOMContentLoaded', () => {
         return group;
     }
 
+    function createRangeInput(key, value, labelText, helpText, min, max, step) {
+        const group = createFormGroup(labelText, helpText);
+        const wrapper = document.createElement('div');
+        wrapper.style.display = 'flex';
+        wrapper.style.alignItems = 'center';
+        wrapper.style.gap = '8px';
+
+        const input = document.createElement('input');
+        input.type = 'range';
+        input.min = min;
+        input.max = max;
+        input.step = step;
+        input.id = `config-${key}`;
+        input.dataset.key = key;
+        
+        // Handle "max" and "off" string defaults coming from config
+        if (value === 'max') input.value = 1;
+        else if (value === 'off') input.value = 0;
+        else input.value = value !== undefined ? value : 1;
+
+        const display = document.createElement('span');
+        display.style.fontFamily = 'monospace';
+        display.style.fontSize = '0.9em';
+        
+        const updateDisplay = (v) => {
+            if (v === '1') return 'max';
+            if (v === '0') return 'off';
+            return v;
+        };
+        display.textContent = updateDisplay(input.value);
+
+        input.addEventListener('input', (e) => {
+            display.textContent = updateDisplay(e.target.value);
+            
+            // Format the value for the backend before sending to handleInputChange
+            const finalValue = e.target.value === '1' ? 'max' : (e.target.value === '0' ? 'off' : parseFloat(e.target.value));
+            
+            // We need to trigger handleInputChange but spoof the value
+            // Since handleInputChange reads directly from the element, we temporarily attach a property
+            e.target._spofedValue = finalValue;
+            handleInputChange(e);
+        });
+
+        wrapper.appendChild(input);
+        wrapper.appendChild(display);
+        group.appendChild(wrapper);
+        return group;
+    }
+
     function createNumberInput(key, value, labelText, helpText) {
         const group = createFormGroup(labelText, helpText);
         const input = document.createElement('input');
@@ -572,7 +621,13 @@ document.addEventListener('DOMContentLoaded', () => {
         input.id = `config-${key}`;
         input.dataset.key = key;
         input.value = value || 0;
-        input.addEventListener('input', handleInputChange);
+        input.addEventListener('input', (e) => {
+            if (e.target._spofedValue !== undefined) {
+                // Ignore, this is handled by the custom wrapper
+            } else {
+                handleInputChange(e);
+            }
+        });
         group.appendChild(input);
         return group;
     }
@@ -899,7 +954,13 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             const data = await response.json();
 
-            panel.innerHTML = `<pre class="mermaid">${data.diagram}</pre>`;
+            let html = '';
+            if (data.description) {
+                html += `<div class="system-diagram-desc" style="margin-bottom: 20px; font-size: 14px; line-height: 1.6; color: var(--text-muted);">${data.description}</div>`;
+            }
+            html += `<pre class="mermaid">${data.diagram}</pre>`;
+            
+            panel.innerHTML = html;
             await mermaid.run({ nodes: panel.querySelectorAll('.mermaid') });
             panel.setAttribute('data-loaded', 'true');
 
@@ -980,14 +1041,17 @@ document.addEventListener('DOMContentLoaded', () => {
         saveBtn.textContent = 'Save Configuration';
         saveBtn.classList.remove('success');
 
-        const { key } = event.target.dataset;
-        let value = event.target.value;
+        const target = event.target;
+        const key = target.dataset.key;
+        
+        // Use spoofed value if provided by custom wrapper
+        let value = target._spofedValue !== undefined ? target._spofedValue : target.value;
 
-        // Convert numeric types
-        if (event.target.type === 'number' || event.target.type === 'range') {
+        // Convert numeric types (unless it's a spoofed string like 'max' or 'off')
+        if ((target.type === 'number' || target.type === 'range') && typeof value !== 'string') {
             value = Number(value);
-        } else if (event.target.type === 'checkbox') {
-            value = event.target.checked;
+        } else if (target.type === 'checkbox') {
+            value = target.checked;
         }
         
         const { type, key: configKey } = currentSelection;
@@ -1168,6 +1232,53 @@ document.addEventListener('DOMContentLoaded', () => {
             const outResp = document.querySelector('.orch-response');
             if (outMeta) outMeta.innerHTML = '';
             if (outResp) outResp.innerHTML = '<em>Log cleared.</em>';
+        });
+    }
+
+    const rerunBtn = document.getElementById('rerun-orch-btn');
+    if (rerunBtn) {
+        rerunBtn.addEventListener('click', async () => {
+            const targetIdEl = document.getElementById('orch-target-id');
+            const targetId = targetIdEl ? targetIdEl.value.trim() : '';
+            if (!targetId) {
+                alert("Please enter a Target Proposal ID to re-run.");
+                return;
+            }
+
+            const outMeta = document.querySelector('.orch-meta');
+            const outResp = document.querySelector('.orch-response');
+            
+            outMeta.innerHTML = `<span>Re-running: ${targetId}</span><span>Status: ⏳ running…</span>`;
+            outResp.textContent = 'Awaiting response from /workflow/transition...';
+            rerunBtn.disabled = true;
+
+            try {
+                // If it starts with DEV or ARCH or NLST it is a proposal
+                // Send it to the transition endpoint to run the council
+                const response = await fetch('/api/workflow/transition', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        proposal_id: targetId,
+                        target_column: 'proposal',
+                        approver: 'dashboard-rerun'
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (!response.ok) {
+                    throw new Error(data.detail || data.error || `HTTP ${response.status}`);
+                }
+                
+                outMeta.innerHTML = `<span class="ok">Re-run successful for ${targetId}</span>`;
+                outResp.textContent = JSON.stringify(data, null, 2);
+            } catch (err) {
+                outMeta.innerHTML = `<span class="err">Re-run failed</span>`;
+                outResp.textContent = String(err.message || err);
+            } finally {
+                rerunBtn.disabled = false;
+            }
         });
     }
     
@@ -1687,6 +1798,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 const s = String(v).trim().toLowerCase();
                 if (s === 'max' || s === 'off') return s;
                 const n = Number(s);
+                if (n === 1) return 'max';
+                if (n === 0) return 'off';
                 return Number.isFinite(n) ? n : s;
             });
             setIfPresent('cache_type_k');
@@ -2063,6 +2176,18 @@ document.addEventListener('DOMContentLoaded', () => {
             if (cardData.column_name === 'backlog' && cardData.substatus) {
                 card.appendChild(buildVerdictBadge(cardData.substatus));
             }
+
+            // Always add a "Rerun Council" button to the card header
+            const rerunBtn = document.createElement('button');
+            rerunBtn.className = 'system-button';
+            rerunBtn.style.cssText = 'position:absolute; right:5px; top:5px; font-size:10px; padding:2px 4px; z-index:10; background:var(--bg-darker); border:1px solid var(--border-color); color:var(--text-color); cursor:pointer; border-radius:3px;';
+            rerunBtn.textContent = '↻ Rerun';
+            rerunBtn.title = 'Re-trigger council queue for this proposal';
+            rerunBtn.onclick = (e) => {
+                e.stopPropagation(); // prevent opening history
+                window.Kanban_rerunCouncil(cardData.proposal_id, cardData.column_name);
+            };
+            card.appendChild(rerunBtn);
 
             // Drag events
             card.addEventListener('dragstart', handleDragStart);
@@ -2667,6 +2792,32 @@ document.addEventListener('DOMContentLoaded', () => {
                 docContainer.textContent = data.content || "Document is empty.";
             } catch (err) {
                 docContainer.innerHTML = `<span style="color:var(--lms-log-err)">Not found or not generated yet: ${err.message}</span>`;
+            }
+        };
+
+        window.Kanban_rerunCouncil = async function(proposalId, currentColumn) {
+            if (!confirm(`Are you sure you want to manually re-trigger the ${currentColumn} council for ${proposalId}?`)) return;
+            
+            try {
+                const response = await fetch(`${API_BASE}/api/workflow/transition`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        proposal_id: proposalId,
+                        target_column: currentColumn,
+                        approver: 'dashboard-rerun'
+                    })
+                });
+                
+                if (!response.ok) {
+                    const data = await response.json();
+                    throw new Error(data.detail || data.error || `HTTP ${response.status}`);
+                }
+                
+                alert(`✅ Council re-triggered successfully for ${proposalId}. Check API logs.`);
+                loadBoard(); // refresh the board to show it's queued
+            } catch (err) {
+                alert(`❌ Failed to re-trigger council: ${err.message}`);
             }
         };
 

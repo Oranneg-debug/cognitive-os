@@ -1531,6 +1531,14 @@ header {
     border-radius: 10px;
 }
 
+.kanban-column-desc {
+    margin: 4px 0 0;
+    font-size: 0.72rem;
+    color: #555;
+    letter-spacing: 0.02em;
+    line-height: 1.3;
+}
+
 .kanban-column-body {
     flex: 1;
     padding: 0.5rem;
@@ -1651,33 +1659,109 @@ header {
     color: #b0b0b0;
 }
 
-/* Beta Testing Substatus Dropdown */
+/* Substatus state machine widget */
 .kanban-card-substatus {
     margin-top: 0.75rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
 }
 
-.kanban-card-substatus label {
-    display: block;
-    font-size: 0.75rem;
-    color: #888;
-    margin-bottom: 2px;
+/* Badge — colour driven by --substatus-color set inline per state */
+.substatus-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 3px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
     text-transform: uppercase;
-    letter-spacing: 0.05em;
+    background: color-mix(in srgb, var(--substatus-color) 18%, transparent);
+    color: var(--substatus-color);
+    border: 1px solid color-mix(in srgb, var(--substatus-color) 40%, transparent);
+    width: fit-content;
 }
 
-.kanban-card-substatus select {
-    width: 100%;
-    padding: 4px 8px;
-    background: #0a0a0a;
-    border: 1px solid var(--border-color);
-    border-radius: 4px;
-    color: var(--text-color);
-    font-size: 0.8rem;
+/* Forward action button — primary instrument-readout style */
+.substatus-btn {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 3px;
+    font-size: 0.75rem;
+    font-family: inherit;
     cursor: pointer;
+    border: 1px solid var(--border-color);
+    background: transparent;
+    color: var(--text-color);
+    transition: border-color 0.15s, color 0.15s;
+    white-space: nowrap;
 }
 
-.kanban-card-substatus select:hover {
+.substatus-btn-forward {
+    border-color: #4a7eb5;
+    color: #7aaedf;
+}
+.substatus-btn-forward:hover {
+    border-color: #7aaedf;
+    color: #aacfee;
+    background: rgba(74, 126, 181, 0.1);
+}
+
+/* Secondary actions row */
+.substatus-btn-row {
+    display: flex;
+    gap: 0.35rem;
+    flex-wrap: wrap;
+}
+
+.substatus-btn-secondary {
+    border-color: var(--border-color);
+    color: #888;
+    font-size: 0.72rem;
+    padding: 2px 7px;
+}
+.substatus-btn-secondary:hover {
+    border-color: #888;
+    color: var(--text-color);
+}
+
+.substatus-btn-danger {
+    border-color: #7a2a2a;
+    color: #c47a7a;
+    font-size: 0.72rem;
+    padding: 2px 7px;
+}
+.substatus-btn-danger:hover {
     border-color: var(--highlight-color);
+    color: #e09090;
+    background: rgba(196, 30, 58, 0.1);
+}
+
+.substatus-hint {
+    font-size: 0.72rem;
+    color: #4ad98a;
+    opacity: 0.7;
+    letter-spacing: 0.04em;
+}
+
+/* Council verdict badge (proposal + backlog columns) */
+.kanban-verdict-wrap {
+    margin-top: 0.6rem;
+}
+
+.verdict-badge {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 3px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    background: color-mix(in srgb, var(--verdict-color) 15%, transparent);
+    color: var(--verdict-color);
+    border: 1px solid color-mix(in srgb, var(--verdict-color) 45%, transparent);
+    cursor: help;
+    width: fit-content;
 }
 
 /* Loading state for cards */

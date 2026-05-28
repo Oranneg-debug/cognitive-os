@@ -7,11 +7,12 @@ temp + rename semantics.
 
 Usage:
     from pathlib import Path
+    from src.paths import DEV_DIR
     from src.filesystem_backend_writer import FilesystemBackendWriter
 
     writer = FilesystemBackendWriter(
-        base_dir=Path("dev"),
-        dead_letter_dir=Path("dev/failed_routings")
+        base_dir=DEV_DIR,
+        dead_letter_dir=DEV_DIR / "failed_routings"
     )
     path = writer.write(Path("proposals/report.md"), "content")
 """

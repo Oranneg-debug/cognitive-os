@@ -340,7 +340,19 @@ class Orchestrator:
                 model=mod_config["model"],
                 temperature=mod_config.get("temperature", 0.4),
                 max_tokens=mod_config.get("max_tokens", 512),
-                gpu_layers=mod_config.get("gpu_layers", 0)
+                gpu_layers=mod_config.get("gpu_layers", 0),
+                top_p=mod_config.get("top_p", 0.9),
+                top_k=mod_config.get("top_k", 40),
+                repeat_penalty=mod_config.get("repeat_penalty", 1.1),
+                min_p=mod_config.get("min_p", 0.0),
+                context_window=mod_config.get("context_window", 8192),
+                flash_attention=mod_config.get("flash_attention"),
+                cache_type_k=mod_config.get("k_cache_quant"),
+                cache_type_v=mod_config.get("v_cache_quant"),
+                gpu_offload_ratio=mod_config.get("gpu_offload_ratio"),
+                n_parallel=mod_config.get("n_parallel"),
+                reasoning_enabled=mod_config.get("reasoning_enabled"),
+                batch_size=mod_config.get("batch_size")
             )
             mod_data = self._extract_json(mod_response)
             self.memory.save_opinion(task_id, "moderator", mod_config["model"], json.dumps(mod_data))
@@ -392,7 +404,15 @@ INSTRUCTIONS:
                 max_tokens=c.get("max_tokens", 8192),
                 context_window=c.get("context_window", 32768),
                 gpu_layers=c.get("gpu_layers", -1),
-                image_base64=image_base64 if idx == 0 else None # Only first agent sees image if provided
+                image_base64=image_base64 if idx == 0 else None, # Only first agent sees image if provided
+                min_p=c.get("min_p", 0.0),
+                flash_attention=c.get("flash_attention"),
+                cache_type_k=c.get("k_cache_quant"),
+                cache_type_v=c.get("v_cache_quant"),
+                gpu_offload_ratio=c.get("gpu_offload_ratio"),
+                n_parallel=c.get("n_parallel"),
+                reasoning_enabled=c.get("reasoning_enabled"),
+                batch_size=c.get("batch_size")
             )
             parsed_agent = self._extract_json(agent_opinion)
             self.memory.save_opinion(task_id, role_key, c["model"], json.dumps(parsed_agent))
@@ -412,7 +432,19 @@ INSTRUCTIONS:
                     model=bg_config["model"],
                     temperature=bg_config.get("temperature", 0.1),
                     max_tokens=bg_config.get("max_tokens", 512),
-                    gpu_layers=bg_config.get("gpu_layers", 0)
+                    gpu_layers=bg_config.get("gpu_layers", 0),
+                    top_p=bg_config.get("top_p", 0.95),
+                    top_k=bg_config.get("top_k", 65),
+                    repeat_penalty=bg_config.get("repeat_penalty", 1.1),
+                    min_p=bg_config.get("min_p", 0.0),
+                    context_window=bg_config.get("context_window", 131072),
+                    flash_attention=bg_config.get("flash_attention"),
+                    cache_type_k=bg_config.get("k_cache_quant"),
+                    cache_type_v=bg_config.get("v_cache_quant"),
+                    gpu_offload_ratio=bg_config.get("gpu_offload_ratio"),
+                    n_parallel=bg_config.get("n_parallel"),
+                    reasoning_enabled=bg_config.get("reasoning_enabled"),
+                    batch_size=bg_config.get("batch_size")
                 )
                 bg_data = self._extract_json(bg_response)
                 self.memory.save_opinion(task_id, f"brand_guard_{role_key}", bg_config["model"], json.dumps(bg_data))
@@ -469,7 +501,15 @@ Output your final blueprint in the specified JSON format for your role.""",
                     repeat_penalty=c.get("repeat_penalty", 1.1),
                     max_tokens=c.get("max_tokens", 8192),
                     context_window=c.get("context_window", 32768),
-                    gpu_layers=c.get("gpu_layers", -1)
+                    gpu_layers=c.get("gpu_layers", -1),
+                    min_p=c.get("min_p", 0.0),
+                    flash_attention=c.get("flash_attention"),
+                    cache_type_k=c.get("k_cache_quant"),
+                    cache_type_v=c.get("v_cache_quant"),
+                    gpu_offload_ratio=c.get("gpu_offload_ratio"),
+                    n_parallel=c.get("n_parallel"),
+                    reasoning_enabled=c.get("reasoning_enabled"),
+                    batch_size=c.get("batch_size")
                 )
             except Exception as synth_exc:
                 import traceback
@@ -504,7 +544,19 @@ Output your final blueprint in the specified JSON format for your role.""",
                 model=s_config["model"],
                 temperature=s_config.get("temperature", 0.3),
                 max_tokens=s_config.get("max_tokens", 4096),
-                gpu_layers=s_config.get("gpu_layers", -1)
+                gpu_layers=s_config.get("gpu_layers", -1),
+                top_p=s_config.get("top_p", 0.9),
+                top_k=s_config.get("top_k", 40),
+                repeat_penalty=s_config.get("repeat_penalty", 1.1),
+                min_p=s_config.get("min_p", 0.0),
+                context_window=s_config.get("context_window", 8192),
+                flash_attention=s_config.get("flash_attention"),
+                cache_type_k=s_config.get("k_cache_quant"),
+                cache_type_v=s_config.get("v_cache_quant"),
+                gpu_offload_ratio=s_config.get("gpu_offload_ratio"),
+                n_parallel=s_config.get("n_parallel"),
+                reasoning_enabled=s_config.get("reasoning_enabled"),
+                batch_size=s_config.get("batch_size")
             )
         else:
             report = f"Scribe role is disabled. Raw final verdict:\n{final_opinion}"
