@@ -105,6 +105,7 @@ class Card:
     substatus: Optional[str] = None
     severity: Optional[str] = None
     origin: Optional[str] = None
+    keywords: Optional[str] = None  # comma-separated tags for dashboard search
     created_ts: str = ""
     updated_ts: str = ""
     state_hash: str = ""
@@ -178,6 +179,7 @@ CREATE TABLE IF NOT EXISTS cards (
     substatus      TEXT,
     severity       TEXT,
     origin         TEXT,
+    keywords       TEXT,
     created_ts     TEXT NOT NULL,
     updated_ts     TEXT NOT NULL,
     state_hash     TEXT NOT NULL
@@ -304,6 +306,7 @@ def _row_to_card(row: sqlite3.Row) -> Card:
         substatus=row["substatus"],
         severity=row["severity"],
         origin=row["origin"],
+        keywords=row["keywords"],
         created_ts=row["created_ts"],
         updated_ts=row["updated_ts"],
         state_hash=row["state_hash"],
@@ -325,7 +328,7 @@ def _update_card_sync(db_path: Path, proposal_id: str, updates: dict) -> Card:
         params = []
         for key, value in updates.items():
             # Basic sanitization to prevent SQL injection on field names
-            if key not in ("title", "substatus", "severity", "origin"):
+            if key not in ("title", "substatus", "severity", "origin", "keywords"):
                 raise ValueError(f"Invalid field for update: {key}")
             set_clauses.append(f"{key} = ?")
             params.append(value)
@@ -398,6 +401,7 @@ def _add_card_sync(
     substatus: Optional[str],
     severity: Optional[str],
     origin: Optional[str],
+    keywords: Optional[str] = None,
     approver: str,
     reason: Optional[str],
 ) -> Card:
@@ -421,8 +425,8 @@ def _add_card_sync(
             """
             INSERT INTO cards
                 (proposal_id, prefix, title, column_name, substatus,
-                 severity, origin, created_ts, updated_ts, state_hash)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 severity, origin, keywords, created_ts, updated_ts, state_hash)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 proposal_id,
@@ -432,6 +436,7 @@ def _add_card_sync(
                 substatus,
                 severity,
                 origin,
+                keywords,
                 now,
                 now,
                 state_hash,
@@ -676,6 +681,7 @@ class KanbanStore:
         substatus: Optional[str] = None,
         severity: Optional[str] = None,
         origin: Optional[str] = None,
+        keywords: Optional[str] = None,
         approver: str = "system",
         reason: Optional[str] = None,
     ) -> Card:
@@ -696,6 +702,7 @@ class KanbanStore:
             substatus=substatus,
             severity=severity,
             origin=origin,
+            keywords=keywords,
             approver=approver,
             reason=reason,
         )

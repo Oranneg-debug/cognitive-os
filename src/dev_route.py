@@ -20,6 +20,7 @@ This module acts as a façade delegating to specialized modules:
 import os
 import uuid
 from datetime import datetime
+from typing import Optional
 
 from src.sync_check import trigger_sync_check
 from src.proposal_writer import ProposalWriter
@@ -162,6 +163,96 @@ class DevRouteManager:
             council_report=council_report
         )
 
+    async def review_proposal(
+        self,
+        proposal_id: str,
+        approver: str,
+        reason: str
+    ) -> dict:
+        """
+        Transition a proposal from backlog/proposal to beta_testing/planning.
+
+        Args:
+            proposal_id: The ID of the proposal
+            approver: Name of the approving entity
+            reason: Reason for the transition
+
+        Returns:
+            dict with transition result
+        """
+        try:
+            from src.workflow_engine import WorkflowEngine
+            from src.workflow_models import TransitionRequest, WorkflowPhase
+            
+            engine = WorkflowEngine()
+            
+            req = TransitionRequest(
+                proposal_id=proposal_id,
+                target_phase=WorkflowPhase.BETA_TESTING,
+                target_substatus="planning",
+                approver=approver,
+                reason=reason
+            )
+            
+            result = await engine.transition(req)
+            
+            if not result.success:
+                return {"error": f"Transition failed: {result.error}"}
+            
+            return {
+                "success": True,
+                "proposal_id": proposal_id,
+                "new_phase": result.new_phase.value if result.new_phase else None,
+                "new_substatus": result.new_substatus
+            }
+        except Exception as e:
+            return {"error": f"Failed to review proposal: {str(e)}"}
+
+    async def create_alpha_plan(
+        self,
+        proposal_id: str,
+        approver: str,
+        reason: str
+    ) -> dict:
+        """
+        Transition a proposal from beta_testing/execution to alpha phase.
+
+        Args:
+            proposal_id: The ID of the proposal
+            approver: Name of the approving entity
+            reason: Reason for the transition
+
+        Returns:
+            dict with transition result
+        """
+        try:
+            from src.workflow_engine import WorkflowEngine
+            from src.workflow_models import TransitionRequest, WorkflowPhase
+            
+            engine = WorkflowEngine()
+            
+            req = TransitionRequest(
+                proposal_id=proposal_id,
+                target_phase=WorkflowPhase.ALPHA,
+                target_substatus=None,
+                approver=approver,
+                reason=reason
+            )
+            
+            result = await engine.transition(req)
+            
+            if not result.success:
+                return {"error": f"Transition failed: {result.error}"}
+            
+            return {
+                "success": True,
+                "proposal_id": proposal_id,
+                "new_phase": result.new_phase.value if result.new_phase else None,
+                "new_substatus": result.new_substatus
+            }
+        except Exception as e:
+            return {"error": f"Failed to create alpha plan: {str(e)}"}
+
     def finalize_release(self, proposal_id: str, release_notes: str) -> dict:
         """
         Finalize a release for a proposal.
@@ -201,10 +292,11 @@ class DevRouteManager:
         from src.workflow_engine import WorkflowEngine
         engine = WorkflowEngine()
         
-        from src.workflow_models import TransitionRequest
+        from src.workflow_models import TransitionRequest, WorkflowPhase
+        
         req = TransitionRequest(
             proposal_id=proposal_id,
-            target_column="finalized",
+            target_phase=WorkflowPhase.FINALIZED,
             target_substatus="released",
             approver="system",
             reason="Finalized via dev route"
@@ -213,7 +305,7 @@ class DevRouteManager:
         try:
             result = engine.transition(req)
             if not result.success:
-                return {"error": f"Failed to finalize proposal: {result.gate_results}"}
+                return {"error": f"Failed to finalize proposal: {result.error}"}
         except Exception as e:
             return {"error": f"Failed to finalize proposal: {str(e)}"}
 

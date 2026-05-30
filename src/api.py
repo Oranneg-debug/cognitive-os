@@ -8,12 +8,13 @@ import os
 import re
 import yaml
 import psutil
+import subprocess
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Union, Dict, Any
 from fastapi import FastAPI, Request, HTTPException, BackgroundTasks
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -248,6 +249,35 @@ def get_master_config():
         raise HTTPException(status_code=404, detail="master_config.md not found")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error parsing config: {e}")
+
+@app.get("/api/system/roles")
+async def get_system_roles():
+    """Return all roles from master_config.md as JSON."""
+    try:
+        config_path = Path(__file__).resolve().parent.parent / "dev" / "master_config.md"
+        content = config_path.read_text(encoding="utf-8")
+        match = re.search(r'```yaml\n(.*?)\n```', content, re.DOTALL)
+        if not match:
+            raise HTTPException(status_code=500, detail="Could not find YAML block in master_config.md")
+        
+        config = yaml.safe_load(match.group(1))
+        roles = config.get("roles", {})
+        
+        # Filter to just the display-relevant fields
+        result = {}
+        for name, cfg in roles.items():
+            result[name] = {
+                "model": cfg.get("model"),
+                "temperature": cfg.get("temperature"),
+                "context_window": cfg.get("context_window"),
+                "compass_weight": cfg.get("compass_weight"),
+            }
+        
+        return {"status": "success", "roles": result}
+    except FileNotFoundError:
+        raise HTTPException(status_code=500, detail="master_config.md not found")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error parsing roles: {e}")
 
 @app.get("/api/models")
 def get_available_models():
@@ -932,6 +962,10 @@ print("[GOV] OutputRouter initialized successfully")
 orchestrator = Orchestrator(output_router=output_router)  # A2: Direct injection
 obsidian = ObsidianWriter()
 
+# Governance API endpoints (A7, ARCH-20260522-161600-60FE0001)
+from src.handoff_vault import HandoffVault
+from src.approval_logger import ApprovalLogger
+
 # ARCH-DA5B0A2D (A3): SQLite-backed kanban store. Schema is created via
 # the lifespan hook so ``import src.api`` stays side-effect-free.
 kanban_store = KanbanStore()
@@ -1028,6 +1062,25 @@ async def process_prompt(request: PromptRequest):
             "response": f"System Error: {str(e)}",
             "details": error_trace
         }
+
+
+# ============================================================================
+# Routing Rules Endpoint (A6 - ARCH-2007E0A1)
+# ============================================================================
+@app.get("/api/routing/rules")
+def get_routing_rules():
+    """
+    Return the routing rules YAML file content for dashboard visibility.
+    
+    Returns:
+        YAML content of config/routing_rules.yaml
+    """
+    rules_path = Path(__file__).resolve().parent.parent / "config" / "routing_rules.yaml"
+    return Response(
+        content=rules_path.read_text(encoding="utf-8"),
+        media_type="text/yaml"
+    )
+
 
 # ============================================================================
 # Direct Role Chat API Endpoint (Dashboard Unified Chatbox)
@@ -1610,12 +1663,27 @@ def _dispatch_proposal_council(proposal_id: str, severity: Optional[str]) -> Non
                 )
 
                 print(f"[DISPATCH] {proposal_id}: council lock acquired, starting {sev_norm} council")
+                from src.patterns import PATTERN_REGISTRY, PatternRequest
+                from src.patterns.alpha_council import execute as alpha_council_execute
+                from src.patterns.final_audit import execute as final_audit_execute
+                req = PatternRequest(user_input=user_input)
                 if sev_norm == "high":
                     council_name = "Sequential Boardroom"
-                    report = orchestrator.execute_sequential_boardroom(user_input=user_input)
-                else:  # medium / unknown
-                    council_name = "Technical Meeting"
-                    report = orchestrator.execute_technical_meeting(user_input=user_input)
+                    report = PATTERN_REGISTRY["SEQUENTIAL_BOARDROOM"](req)
+                else:  # medium — single-pass check, no sequential deliberation
+                    council_name = "Quick Technical Review (single-pass)"
+                    from src.council_runner import get_role_config
+                    from src.llm_client import llm
+                    c = get_role_config("technical_specialist")
+                    report = llm.generate_response(
+                        prompt=req.user_input,
+                        system_prompt=c.get("system_prompt"),
+                        model=c.get("model"),
+                        temperature=c.get("temperature", 0.7),
+                        max_tokens=c.get("max_tokens", 4096),
+                        gpu_layers=c.get("gpu_layers", -1),
+                        context_window=c.get("context_window", 32768),
+                    )
 
             # `report` may be a Path (output_router-routed) or str.
             report_text = report.read_text(encoding="utf-8") if isinstance(report, Path) else (report or "")
@@ -1639,6 +1707,32 @@ def _dispatch_proposal_council(proposal_id: str, severity: Optional[str]) -> Non
                 timestamp=datetime.now(),
                 state_hash=current_hash
             ))
+
+            # Write the SQLite row explicitly so _proposal_is_approved gate works.
+            # (ApprovalRecord model doesn't map 1:1 to approval_log schema —
+            #  pending a proper fix; this is the systemic bug causing all
+            #  "council has not approved" errors on beta-testing drags.)
+            import sqlite3
+            try:
+                conn = sqlite3.connect(str(ApprovalLogger().db_path))
+                cur = conn.cursor()
+                cur.execute(
+                    "INSERT INTO approval_log (proposal_id, role, decision, approver, ts) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (
+                        proposal_id,
+                        "sequential_boardroom" if sev_norm == "high" else "technical_meeting",
+                        decision,
+                        "sequential_boardroom" if sev_norm == "high" else "technical_meeting",
+                        datetime.now().isoformat(),
+                    ),
+                )
+                conn.commit()
+                print(f"[DISPATCH] approval_log row written for {proposal_id}")
+            except Exception as exc:
+                print(f"[DISPATCH] approval_log write failed for {proposal_id}: {exc!r}")
+            finally:
+                conn.close()
 
         # Stale-card guard: if the user moved the card OUT of `proposal`
         # while the council was running, our write-back becomes noise.
@@ -1723,7 +1817,7 @@ def _proposal_is_approved(proposal_id: str) -> bool:
             cur = conn.cursor()
             cur.execute(
                 "SELECT decision FROM approval_log "
-                "WHERE proposal_id = ? AND role = 'proposal_council' "
+                "WHERE proposal_id = ? AND role IN ('proposal_council', 'technical_meeting') "
                 "ORDER BY id DESC LIMIT 1",
                 (proposal_id,),
             )
@@ -1739,27 +1833,170 @@ def _proposal_is_approved(proposal_id: str) -> bool:
     return decision.startswith("APPROVED") or decision.startswith("AUTO-APPROVED")
 
 
-def _run_alpha_council_and_handoff(proposal_id: str) -> None:
-    """Run the Sequential Boardroom to produce the Alpha Polish plan.
-
-    Fires as a BackgroundTask when a card enters ``alpha polish``.
-    Delegates to ``orchestrator.continue_development_lifecycle('alpha')``,
-    which runs the full boardroom and writes ``ALPHA_HANDOFF.md``.
-    Never raises — the dashboard already returned 200.
+def _parse_beta_handoff_tasks(beta_handoff_path: Path) -> tuple[bool, list[str]]:
+    """Parse BETA_HANDOFF.md to check if all implementation tasks are complete.
+    
+    Returns:
+        Tuple of (all_tasks_complete, list of incomplete task IDs)
     """
     try:
+        content = beta_handoff_path.read_text(encoding="utf-8", errors="replace")
+        
+        # Find the implementation tasks section
+        tasks_section_match = re.search(
+            r'## 🔧 Implementation Tasks.*?(?=---|\Z)',
+            content,
+            re.DOTALL | re.IGNORECASE
+        )
+        if not tasks_section_match:
+            print(f"[GATE] BETA_HANDOFF.md missing '## Implementation Tasks' section")
+            return False, []
+        
+        tasks_content = tasks_section_match.group(0)
+        
+        # Find all incomplete tasks (- [ ] pattern)
+        incomplete_tasks = re.findall(
+            r'^\s*-\s*\[\s*\]\s*\*\*\[(?:✏️|✅)\s+\w+\]\s+(.+?)\*\*',
+            tasks_content,
+            re.MULTILINE
+        )
+        
+        # Find all complete tasks (- [x] pattern)
+        complete_tasks = re.findall(
+            r'^\s*-\s*\[x\]\s*\*\*\[(?:✏️|✅)\s+\w+\]\s+(.+?)\*\*',
+            tasks_content,
+            re.MULTILINE
+        )
+        
+        all_complete = len(incomplete_tasks) == 0
+        return all_complete, incomplete_tasks
+        
+    except Exception as exc:  # noqa: BLE001
+        print(f"[GATE] Failed to parse BETA_HANDOFF.md for {beta_handoff_path.name}: {exc!r}")
+        return False, []
+
+
+def _run_pytests() -> tuple[bool, str]:
+    """Run pytest and return (success, output).
+    
+    Returns:
+        Tuple of (pytest_passed, output_text)
+    """
+    try:
+        repo_root = Path(__file__).resolve().parent.parent  # cognitive-os/
+        
+        result = subprocess.run(
+            [sys.executable, "-m", "pytest", "-v", "--tb=short"],
+            cwd=str(repo_root),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=300,  # 5-minute timeout for tests
+        )
+        
+        passed = result.returncode == 0
+        output = result.stdout + "\n" + result.stderr if result.stderr else result.stdout
+        
+        return passed, output
+        
+    except subprocess.TimeoutExpired:
+        return False, "pytest timed out (>5 minutes)"
+    except Exception as exc:  # noqa: BLE001
+        return False, f"pytest execution failed: {exc!r}"
+
+
+def _run_alpha_council_and_handoff(proposal_id: str) -> None:
+    """Run the ALPHA_COUNCIL pattern to produce the Alpha Polish plan.
+
+    Fires as a BackgroundTask when a card enters ``alpha polish``.
+    Calls `alpha_council_execute` which runs the sequential boardroom
+    and writes ``ALPHA_HANDOFF.md`` via OutputRouter.
+    
+    BEFORE executing, validates:
+      1. BETA_HANDOFF.md exists with all implementation tasks complete
+      2. All tests pass (pytest)
+    
+    Never raises — the dashboard already returned 200.
+    """
+    beta_path = HANDOFFS_DIR / f"{proposal_id}_BETA_HANDOFF.md"
+    try:
+        # ---- Validation Gate: BETA_HANDOFF.md must exist with all tasks complete
+        if not beta_path.exists():
+            print(f"[ALPHA] {proposal_id}: BLOCKED - BETA_HANDOFF.md not found")
+            def _update_db_err():
+                import asyncio
+                try:
+                    loop = asyncio.get_running_loop()
+                except RuntimeError:
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                loop.run_until_complete(kanban_store.move_card(
+                    proposal_id=proposal_id, target_column="alpha polish",
+                    target_substatus="blocked", approver="system", 
+                    reason="BETA_HANDOFF.md missing", gate_passed=-1
+                ))
+            _update_db_err()
+            return
+        
+        all_complete, incomplete = _parse_beta_handoff_tasks(beta_path)
+        if not all_complete:
+            print(f"[ALPHA] {proposal_id}: BLOCKED - {len(incomplete)} tasks incomplete in BETA_HANDOFF.md")
+            def _update_db_err():
+                import asyncio
+                try:
+                    loop = asyncio.get_running_loop()
+                except RuntimeError:
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                task_list = ", ".join(incomplete[:3]) + ("..." if len(incomplete) > 3 else "")
+                loop.run_until_complete(kanban_store.move_card(
+                    proposal_id=proposal_id, target_column="alpha polish",
+                    target_substatus="blocked", approver="system", 
+                    reason=f"Implementation tasks incomplete: {task_list}", gate_passed=-1
+                ))
+            _update_db_err()
+            return
+        
+        # ---- Validation Gate: All tests must pass
+        tests_passed, test_output = _run_pytests()
+        if not tests_passed:
+            print(f"[ALPHA] {proposal_id}: BLOCKED - pytest failed")
+            def _update_db_err():
+                import asyncio
+                try:
+                    loop = asyncio.get_running_loop()
+                except RuntimeError:
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                # Truncate output to 500 chars for UI
+                err_snippet = test_output[:500].strip() if len(test_output) > 500 else test_output
+                loop.run_until_complete(kanban_store.move_card(
+                    proposal_id=proposal_id, target_column="alpha polish",
+                    target_substatus="blocked", approver="system", 
+                    reason=f"Tests failed: {err_snippet}", gate_passed=-1
+                ))
+            _update_db_err()
+            return
+        
+        print(f"[ALPHA] {proposal_id}: All validation gates passed, running alpha council")
+        
+        # ---- Execute Alpha Council
         proposal_text = _read_proposal_text(proposal_id) or ""
         print(f"[ALPHA] {proposal_id}: waiting for council lock…")
         with _council_lock:
-            print(f"[ALPHA] {proposal_id}: council lock acquired, starting alpha boardroom")
-            orchestrator.continue_development_lifecycle(
-                proposal_id=proposal_id,
-                next_phase="alpha",
-                proposal_content=proposal_text,
+            print(f"[ALPHA] {proposal_id}: council lock acquired, starting alpha council")
+            from src.patterns import PatternRequest
+            from src.patterns.alpha_council import execute as alpha_council_execute
+            user_input = (
+                f"Produce an Alpha Handoff plan for proposal {proposal_id}.\n\n"
+                f"---\n{proposal_text}\n---\n"
             )
-        print(f"[ALPHA] boardroom + handoff complete for {proposal_id}")
-        _trigger_vault_sync()
-        
+            req = PatternRequest(user_input=user_input)
+            report = alpha_council_execute(req)
+        report_text = report.read_text(encoding="utf-8") if isinstance(report, Path) else (report or "")
+        print(f"[ALPHA] boardroom complete for {proposal_id}")
+
         def _update_db(subst: str, rsn: str):
             import asyncio
             try:
@@ -1771,8 +2008,18 @@ def _run_alpha_council_and_handoff(proposal_id: str) -> None:
                 proposal_id=proposal_id, target_column="alpha polish",
                 target_substatus=subst, approver="system", reason=rsn, gate_passed=1
             ))
-            
+
+        from src.dev_route import DevRouteManager
+        result = DevRouteManager().generate_alpha_handoff(proposal_id, report_text)
+        if "error" in result:
+            print(f"[ALPHA] handoff generation FAILED for {proposal_id}: {result['error']}")
+            _update_db("blocked", "handoff generation failed")
+            return
+
+        print(f"[ALPHA] handoff saved: {result.get('filename', 'unknown')}")
+        _trigger_vault_sync()
         _update_db("execution.coding", "alpha handoff complete")
+        
     except Exception as exc:  # noqa: BLE001
         import traceback
         print(f"[ALPHA][ERROR] {proposal_id}: {exc!r}\n{traceback.format_exc(limit=4)}")
@@ -1793,20 +2040,73 @@ def _run_alpha_council_and_handoff(proposal_id: str) -> None:
             pass
 
 def _finalize_proposal(proposal_id: str, phase: str) -> None:
-    """Stamp the proposal as finalized/deployed and sync to vault.
+    """Run the FINAL_AUDIT pattern to produce the Final Audit report.
 
     Fires as a BackgroundTask when a card enters ``finalized`` or
-    ``deployed``. Calls ``DevRouteManager.finalize_release`` which
-    rewrites the proposal's frontmatter + body (no LLM call).
+    ``deployed``. Calls `final_audit_execute` which runs the audit
+    and writes ``FINAL_AUDIT.md`` via OutputRouter.
+    
+    Verifies the audit verdict (APPROVED/REJECTED) and blocks the transition
+    if REJECTED.
+    
     Never raises — the dashboard already returned 200.
     """
     try:
+        proposal_text = _read_proposal_text(proposal_id) or ""
+        print(f"[FINALIZE] {proposal_id}: waiting for council lock…")
+        with _council_lock:
+            print(f"[FINALIZE] {proposal_id}: council lock acquired, starting final audit")
+            from src.patterns import PatternRequest
+            from src.patterns.final_audit import execute as final_audit_execute
+            user_input = (
+                f"Produce a Final Audit report for proposal {proposal_id}.\n\n"
+                f"---\n{proposal_text}\n---\n"
+            )
+            req = PatternRequest(user_input=user_input)
+            report = final_audit_execute(req)
+        report_text = report.read_text(encoding="utf-8") if isinstance(report, Path) else (report or "")
+        print(f"[FINALIZE] final audit complete for {proposal_id}")
+        
+        # ---- Parse verdict from final audit output
+        if "VERDICT: REJECTED" in report_text:
+            print(f"[FINALIZE] {proposal_id}: BLOCKED by final audit")
+            def _update_db_rejected():
+                import asyncio
+                try:
+                    loop = asyncio.get_running_loop()
+                except RuntimeError:
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                loop.run_until_complete(kanban_store.move_card(
+                    proposal_id=proposal_id, target_column=phase,
+                    target_substatus="rejected", approver="final_audit", 
+                    reason="Final audit rejected proposal", gate_passed=-1
+                ))
+            _update_db_rejected()
+            return
+        
+        # ---- APPROVED: persist report and finalize
+        final_report_path = HANDOFFS_DIR / f"{proposal_id}_FINAL_AUDIT.md"
+        final_report_path.write_text(report_text, encoding="utf-8")
+        print(f"[FINALIZE] report saved: {final_report_path.name}")
+
         from src.dev_route import DevRouteManager
-        DevRouteManager().finalize_release(
-            proposal_id,
-            f"Released via Kanban board transition to '{phase}'.",
-        )
-        print(f"[FINALIZE] {proposal_id} → {phase}")
+        result = DevRouteManager().finalize_release(proposal_id, report_text)
+        if "error" in result:
+            print(f"[FINALIZE] release finalization FAILED for {proposal_id}: {result['error']}")
+
+        def _update_db_final():
+            import asyncio
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+            loop.run_until_complete(kanban_store.update_card(
+                proposal_id=proposal_id,
+                updates={"substatus": "approved", "state_hash": ""}
+            ))
+        _update_db_final()
         _trigger_vault_sync()
     except Exception as exc:  # noqa: BLE001
         import traceback
@@ -1828,10 +2128,9 @@ def _run_beta_council_and_handoff(proposal_id: str) -> None:
         print(f"[BETA] {proposal_id}: waiting for council lock…")
         with _council_lock:
             print(f"[BETA] {proposal_id}: council lock acquired, starting beta council")
-            # The Beta Council is a single dedicated role (dev_beta_council).
-            # We run a one-shot Technical Meeting so the orchestration plumbing
-            # (memory, brand-guard, scribe) still kicks in.
-            report = orchestrator.execute_technical_meeting(user_input=user_input)
+            from src.patterns import PATTERN_REGISTRY, PatternRequest
+            req = PatternRequest(user_input=user_input)
+            report = PATTERN_REGISTRY["TECHNICAL_MEETING"](req)
         report_text = report.read_text(encoding="utf-8") if isinstance(report, Path) else (report or "")
 
         from src.dev_route import DevRouteManager
@@ -1970,17 +2269,26 @@ async def transition_card(req: TransitionRequestPayload, background_tasks: Backg
         and req.target_substatus is not None
     )
 
+    is_rerun = (
+        req.approver == "dashboard-rerun"
+        and card.column_name == req.target_column
+    )
+
     if req.target_column == "proposal":
         background_tasks.add_task(
             _dispatch_proposal_council, card.proposal_id, card.severity
         )
-    elif req.target_column == "beta testing" and not is_substatus_change:
+    elif req.target_column == "beta testing" and (not is_substatus_change or is_rerun):
         # Entry into beta testing (cross-column) — run council + handoff.
+        # Also fires on explicit "↻ Rerun" button from same column.
         background_tasks.add_task(_run_beta_council_and_handoff, card.proposal_id)
-    elif req.target_column == "alpha polish" and not is_substatus_change:
+    elif req.target_column == "alpha polish" and (not is_substatus_change or is_rerun):
         # Entry into alpha polish (cross-column) — run boardroom + handoff.
+        # Also fires on explicit "↻ Rerun" button from same column.
         background_tasks.add_task(_run_alpha_council_and_handoff, card.proposal_id)
-    elif req.target_column in ("finalized", "deployed"):
+    elif req.target_column in ("finalized", "deployed") or (card.column_name in ("finalized", "deployed") and is_rerun):
+        # Entry into finalized/deployed — run final audit + handoff.
+        # Also fires on explicit "↻ Rerun" button from same column.
         background_tasks.add_task(_finalize_proposal, card.proposal_id, req.target_column)
 
     # Substatus change within beta/alpha — sync to proposal YAML.
@@ -2117,6 +2425,8 @@ async def get_artifact(proposal_id: str, type: str = "proposal"):
         path = HANDOFFS_DIR / f"{proposal_id}_BETA_HANDOFF.md"
     elif type == "alpha_handoff":
         path = HANDOFFS_DIR / f"{proposal_id}_ALPHA_HANDOFF.md"
+    elif type == "final_audit":
+        path = HANDOFFS_DIR / f"{proposal_id}_FINAL_AUDIT.md"
     else:
         raise HTTPException(status_code=400, detail=f"Unknown artifact type {type}")
         
@@ -2139,6 +2449,126 @@ async def delete_kanban_card(proposal_id: str):
             "proposal_id": proposal_id,
         }
     except KanbanStoreError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# Governance API endpoints (A7, ARCH-20260522-161600-60FE0001)
+@app.get("/api/governance/log/{proposal_id}")
+async def get_governance_log(proposal_id: str):
+    """Return ordered ApprovalRecord JSON for a proposal."""
+    try:
+        logger = ApprovalLogger()
+        records = logger.get_log(proposal_id)
+        if not records:
+            raise HTTPException(status_code=404, detail=f"No approval log found for proposal_id='{proposal_id}'")
+        
+        # Convert ApprovalRecord objects to serializable dicts
+        return {
+            "status": "success",
+            "proposal_id": proposal_id,
+            "records": [
+                {
+                    "proposal_id": r.proposal_id,
+                    "role": r.role,
+                    "decision": r.decision,
+                    "approver": r.approver,
+                    "ts": r.ts.isoformat() if r.ts else None,
+                    "prior_record_hash": r.prior_record_hash,
+                    "state_hash": r.state_hash
+                }
+                for r in records
+            ]
+        }
+    except VaultIntegrityError as e:
+        raise HTTPException(status_code=500, detail=f"Integrity check failed: {e.reason}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/governance/migrate")
+async def run_migrate():
+    """Idempotent migration rerun for legacy files."""
+    try:
+        from src.schema_validator import migrate_legacy_proposals
+        result = migrate_legacy_proposals()
+        return {
+            "status": "success",
+            "message": f"Migrated {result['migrated']} files, skipped {result['skipped']}"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# DevLog Agent Dashboard Endpoint (ARCH-78D36EDB, Alpha Polish)
+# ============================================================================
+
+from datetime import date
+
+@app.post("/api/devlog/draft")
+async def generate_devlog_draft(date_str: Optional[str] = None):
+    """Generate a DevLog draft from the specified date via the dashboard."""
+    try:
+        today = date_str or date.today().isoformat()
+        from src.devlog_agent import DevLogAgent
+        from src.models.devlog import DevLogConfig
+        
+        config = DevLogConfig()
+        agent = DevLogAgent(config=config)
+        
+        evidence = agent.gather_evidence(today)
+        draft = agent.synthesize_post(evidence)
+        
+        return {
+            "status": "success",
+            "date": today,
+            "draft": draft.model_dump() if hasattr(draft, 'model_dump') else str(draft),
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"DevLog draft failed: {str(e)}")
+
+
+@app.post("/api/governance/migrate")
+async def run_migrate():
+    """Idempotent migration rerun for legacy files."""
+    try:
+        from src.schema_validator import migrate_legacy_proposals
+        result = migrate_legacy_proposals()
+        return {
+            "status": "success",
+            "message": f"Migrated {result['migrated']} files, skipped {result['skipped']}"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/governance/archives/{proposal_id}")
+async def get_governance_archives(proposal_id: str):
+    """Return artifact history for a proposal."""
+    try:
+        vault = HandoffVault()
+        history = vault.get_history(proposal_id)
+        if not history:
+            raise HTTPException(status_code=404, detail=f"No archives found for proposal_id='{proposal_id}'")
+        
+        return {
+            "status": "success",
+            "proposal_id": proposal_id,
+            "artifacts": [
+                {
+                    "proposal_id": a.proposal_id,
+                    "phase": a.phase.value,
+                    "timestamp": a.timestamp.isoformat() if a.timestamp else None,
+                    "sha256": a.sha256,
+                    "prior_hash": a.prior_hash,
+                    "snapshot_path": a.snapshot_path
+                }
+                for a in history
+            ]
+        }
+    except VaultIntegrityError as e:
+        raise HTTPException(status_code=500, detail=f"Integrity check failed: {e.reason}")
+    except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 

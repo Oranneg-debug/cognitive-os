@@ -1,0 +1,72 @@
+# DevLog Agent Configuration
+# 
+# Controls evidence gathering, publishing cadence, and platform targets.
+# This file is the source of truth for DevLog Agent behavior.
+
+# ════════════════════════════════════════════════════════════════════
+#  EVIDENCE SOURCES
+# ────────────────────────────────────────────────────────────────────
+
+# Directories where DevLog Agent may gather evidence from.
+allowed_sources:
+  - "git/commits"
+  - "dev/gates"
+  - "council_memory"
+  - "tests"
+
+# Patterns that will cause evidence to be excluded (PathGuard).
+forbidden_sources:
+  - "Z-Inbox/"
+  - "mock_vault/"
+  - ".private"
+  - "_private"
+
+# ════════════════════════════════════════════════════════════════════
+#  PUBLISHING CONFIGURATION
+# ────────────────────────────────────────────────────────────────────
+
+# Publishing cadence: 'daily', 'weekly', or 'manual'
+cadence: "manual"
+
+# Role name for the devlog scribe in master_config.md
+council_role: "devlog_scribe"
+
+# Target publishing platforms ( OutputRouter wired in Phase 5)
+platforms:
+  - "github_pages"
+  - "dev_to"
+
+# Output directory for GitHub Pages posts
+output_directory: "_posts"
+
+# ════════════════════════════════════════════════════════════════════
+#  STYLE AND TONE
+# ────────────────────────────────────────────────────────────────────
+
+# DevLog tone settings
+tone:
+  style: "direct"
+  perspective: "build-in-public"
+  include_failures: true
+  highlight_decisions: true
+
+# Tweet thread configuration
+tweets:
+  min_tweets: 3
+  max_tweets: 4
+  hashtag_style: "technical"
+  tags:
+    - "#cognitivos"
+    - "#devlog"
+    - "#buildinpublic"
+
+# ════════════════════════════════════════════════════════════════════
+#  APPROVAL & AUDIT
+# ────────────────────────────────────────────────────────────────────
+
+# Require explicit approval before publishing (CSTR-DEVLOG-V1)
+require_approval: true
+
+# Log all publishes to ApprovalLogger with evidence_hash (CSTR-DEVLOG-V3)
+audit_enabled: true
+audit_destination: "dev/gates/devlog_audit"

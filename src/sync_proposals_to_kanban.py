@@ -54,8 +54,20 @@ def extract_metadata(file_path: Path) -> Dict[str, Any]:
         "column_name": metadata.get('column', 'backlog'),
         "substatus": metadata.get('substatus', metadata.get('status', 'pending')),
         "severity": metadata.get('severity', 'medium'),
-        "origin": metadata.get('origin', 'unknown')
+        "origin": metadata.get('origin', 'unknown'),
+        "keywords": _serialize_keywords(metadata.get('keywords')),
     }
+
+
+def _serialize_keywords(keywords) -> Optional[str]:
+    """Normalize keywords from YAML (list) to SQLite (comma-separated string)."""
+    if not keywords:
+        return None
+    if isinstance(keywords, str):
+        return keywords
+    if isinstance(keywords, list):
+        return ",".join(str(k).strip() for k in keywords if k)
+    return str(keywords)
 
 
 async def sync_proposal(store: KanbanStore, proposal_id: str) -> bool:
@@ -71,8 +83,13 @@ async def sync_proposal(store: KanbanStore, proposal_id: str) -> bool:
                 title=meta["title"],
                 substatus=meta["substatus"],
                 severity=meta["severity"],
-                origin=meta["origin"]
+                origin=meta["origin"],
+                keywords=meta.get("keywords"),
             )
+            # Update keywords on existing cards (add_card is idempotent,
+            # so it returns early without updating fields).
+            if meta.get("keywords"):
+                await store.update_card(meta["proposal_id"], {"keywords": meta["keywords"]})
             return True
     return False
 
@@ -108,7 +125,8 @@ async def main():
                     title=meta["title"],
                     substatus=meta["substatus"],
                     severity=meta["severity"],
-                    origin=meta["origin"]
+                    origin=meta["origin"],
+                    keywords=meta.get("keywords"),
                 )
                 count += 1
         print(f"Synced {count} proposals")

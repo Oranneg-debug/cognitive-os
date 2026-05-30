@@ -84,6 +84,60 @@ def test_constructor_rejects_writer_implementing_both_protocols() -> None:
         )
 
 
+# ════════════════════════════════════════════════════════════════════
+#  route() tests (E1, E7, T2)
+# ════════════════════════════════════════════════════════════════════
+
+
+def test_route_boardroom_proposal() -> None:
+    """E1: Routes content with #boardroom + definitive_blueprint to proposals."""
+    mock_backend = MockBackendWriter()
+    router = OutputRouter(
+        rules_path=RULES_PATH,
+        backend_writer=mock_backend,
+        dead_letter_dir=ROOT / "dev" / "failed_routings",
+    )
+
+    content = """# Boardroom Proposal
+
+ORCHESTRATED_BOARD_CHAIRMAN
+
+definitive_blueprint: Some design
+
+Some body content here.
+"""
+
+    decision = router.route(content)
+
+    assert decision.rule_name == "boardroom_proposal"
+    assert decision.destination == "proposals"
+    assert decision.severity == "HIGH"
+    assert "#boardroom" in decision.matched_markers or "ORCHESTRATED_BOARD_CHAIRMAN" in decision.matched_markers
+
+
+def test_route_catchall_fires_when_nothing_else_matches() -> None:
+    """E1: Catch-all rule fires when no specific rule matches."""
+    mock_backend = MockBackendWriter()
+    router = OutputRouter(
+        rules_path=RULES_PATH,
+        backend_writer=mock_backend,
+        dead_letter_dir=ROOT / "dev" / "failed_routings",
+    )
+
+    content = """# Some Random Content
+
+This doesn't match any specific rule.
+
+But should still be routed.
+"""
+
+    decision = router.route(content)
+
+    assert decision.rule_name == "decision_only"
+    assert decision.destination == "decisions"
+    assert decision.matched_markers == []
+
+
 def test_constructor_accepts_backend_writer() -> None:
     """BackendWriterProtocol should be accepted."""
     mock_backend = MockBackendWriter()

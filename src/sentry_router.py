@@ -16,7 +16,7 @@ class SentryRouter:
             "TECHNICAL_MEETING": "Draft (Specialist) → Expand (Creative) → Refine (Critic) → Synthesize pipeline",
             "DESIGN_MEETING": "Draft (junior_designer) → Expand (creative_expansionist) → Refine (Critic) → Synthesize + Image Prompts (senior_designer)",
             "SEQUENTIAL_BOARDROOM": "Local: Independent opinions + memory file",
-            "ONLINE_BOARDROOM": "Frontier models via API (Parallel)",
+            "ORACLE_COUNCIL": "Strategic oversight with MAXIMUM compass (local or online frontier models)",
             "NFT_CREATION": "NFT Metadata generation + Minting simulation",
             "DEVELOPMENT_LIFECYCLE": "Dev proposal → Beta review → Alpha polish → Finalize release"
         }
@@ -145,12 +145,10 @@ class SentryRouter:
         elif complexity == "medium":
             return "STANDARD"
         else:
-            if is_online and domain == "strategic":
-                return "ONLINE_BOARDROOM"
+            # ORACLE_COUNCIL handles both local and online frontier models
+            if domain == "strategic" or domain == "oracle":
+                return "ORACLE_COUNCIL"
+            elif domain == "creative":
+                return "DESIGN_MEETING"
             else:
-                if domain == "strategic":
-                    return "SEQUENTIAL_BOARDROOM"
-                elif domain == "creative":
-                    return "DESIGN_MEETING"
-                else:
-                    return "TECHNICAL_MEETING"
+                return "TECHNICAL_MEETING"

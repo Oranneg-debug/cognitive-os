@@ -238,6 +238,84 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- Data Fetching and Initialization ---
 
+    // Council topology configuration (D1)
+    const COUNCIL_TOPOLOGY = {
+        "proposal": {
+            name: "Proposal Phase",
+            description: "Proposal council runs based on severity",
+            councils: [
+                { severity: "high", council: "Sequential Boardroom", roles: ["board_strategist", "board_specialist", "board_critic", "board_creative", "board_logical", "board_chairman"] },
+                { severity: "medium", council: "Technical Meeting", roles: ["technical_specialist", "creative_expansionist", "technical_critic", "overseer"] },
+                { severity: "low", council: "Auto-Approval", roles: ["system"] }
+            ]
+        },
+        "beta_testing": {
+            name: "Beta Phase",
+            description: "Dev Beta Council produces handoff doc",
+            councils: [
+                { council: "Dev Beta Council", roles: ["dev_beta_planning", "dev_beta_coding", "dev_beta_debugging", "dev_beta_review"] }
+            ]
+        },
+        "alpha_polish": {
+            name: "Alpha Phase",
+            description: "Alpha Council produces Alpha Handoff",
+            councils: [
+                { council: "Alpha Council", roles: ["alpha_ux", "alpha_perf", "alpha_critic", "dev_alpha_polish"] }
+            ]
+        },
+        "finalized": {
+            name: "Final Phase",
+            description: "Final Audit validates release readiness",
+            councils: [
+                { council: "Final Audit", roles: ["final_scribe", "dev_final_audit"] }
+            ]
+        }
+    };
+
+    // Render council topology diagram (D1)
+    function renderCouncilTopology() {
+        const container = document.getElementById('council-topology');
+        if (!container) return;
+        
+        let html = '<div class="council-topology-visual">\n';
+        html += '  <h3>Council Flow Diagram</h3>\n';
+        html += '  <div class="council-flow">\n';
+        html += '    <div class="flow-step"><strong>Proposal</strong><br><small>Boardroom (high) / Technical (medium) / Auto (low)</small></div>\n';
+        html += '    <div class="arrow">↓</div>\n';
+        html += '    <div class="flow-step"><strong>Beta Testing</strong><br><small>Dev Beta Council → Handoff</small></div>\n';
+        html += '    <div class="arrow">↓</div>\n';
+        html += '    <div class="flow-step"><strong>Alpha Polish</strong><br><small>Alpha Council → Handoff</small></div>\n';
+        html += '    <div class="arrow">↓</div>\n';
+        html += '    <div class="flow-step"><strong>Finalized</strong><br><small>Final Audit</small></div>\n';
+        html += '  </div>\n';
+        html += '</div>\n';
+        html += '<div class="council-details">\n';
+        html += '  <h3>Current Council Status</h3>\n';
+        html += '  <div id="current-council-info" class="council-status-card">\n';
+        html += '    <p class="placeholder">Loading council status...</p>\n';
+        html += '  </div>\n';
+        html += '</div>\n';
+        
+        container.innerHTML = html;
+        
+        // Try to get current council lock status
+        fetch('/api/loaded').then(async response => {
+            if (response.ok) {
+                // Check if we can determine which council is running
+                // For now, just show that the system is ready
+                const info = document.getElementById('current-council-info');
+                if (info) {
+                    info.innerHTML = '<div class="council-ready">✅ <strong>System Ready</strong><br>Ready to process proposals. Councils will run automatically based on proposal severity and phase.</div>';
+                }
+            }
+        }).catch(() => {
+            const info = document.getElementById('current-council-info');
+            if (info) {
+                info.innerHTML = '<div class="council-ready">✅ <strong>System Ready</strong><br>Councils configured and ready to execute.</div>';
+            }
+        });
+    }
+
     async function loadConfig() {
         try {
             // Fetch config and live models concurrently for speed
@@ -935,6 +1013,19 @@ document.addEventListener('DOMContentLoaded', () => {
             lmstudio.deactivate();
             initializeSystemTab();
             return;
+        }
+
+        // Config tab: render council topology
+        if (tabName === 'config') {
+            renderCouncilTopology();
+        }
+
+        // DevLog tab: set default date to today
+        if (tabName === 'devlog') {
+            const dateInput = document.getElementById('devlog-date');
+            if (dateInput && !dateInput.value) {
+                dateInput.value = new Date().toISOString().split('T')[0];
+            }
         }
 
         // Any other tab: stop the LM Studio log poller
@@ -2141,6 +2232,10 @@ document.addEventListener('DOMContentLoaded', () => {
             // happens for cards migrated from the legacy vault that lacked
             // a frontmatter `title` field. An untitled card is unreadable.
             const displayTitle = cardData.title || cardData.proposal_id;
+            // Keywords — comma-separated tags displayed as small badges
+            const keywordsHtml = cardData.keywords
+                ? `<div class="kanban-card-keywords">${cardData.keywords.split(',').map(k => `<span class="kanban-card-keyword-tag">${escapeHtml(k.trim())}</span>`).join('')}</div>`
+                : '';
             // Compact ID: keep prefix-shortdate-hash readable; the full id
             // (e.g. ARCH-20260524-011510-5DFB393F) is too long for a card
             // footer but the user needs *some* way to refer to it in chat.
@@ -2157,6 +2252,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         <span>${severityClass.toUpperCase()}</span>
                     </span>
                 </div>
+                ${keywordsHtml}
                 <div class="kanban-card-id" title="Click card to copy this id">${escapeHtml(shortId)}</div>
             `;
 
@@ -2174,6 +2270,12 @@ document.addEventListener('DOMContentLoaded', () => {
             // Backlog column: show any non-null substatus (e.g. "rejected"
             // persists after a failed council so rework cards are visible).
             if (cardData.column_name === 'backlog' && cardData.substatus) {
+                card.appendChild(buildVerdictBadge(cardData.substatus));
+            }
+
+            // Finalized column: show audit verdict badge (approved/rejected)
+            // so the final audit outcome is visible on the card.
+            if (cardData.column_name === 'finalized' && cardData.substatus) {
                 card.appendChild(buildVerdictBadge(cardData.substatus));
             }
 
@@ -2455,7 +2557,9 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         function handleDragEnd(e) {
-            this.classList.remove('dragging');
+            if (draggedCard) {
+                draggedCard.classList.remove('dragging');
+            }
             draggedCard = null;
             sourceColumn = null;
             
@@ -2483,11 +2587,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 e.preventDefault();
                 column.classList.remove('drag-over');
                 
-                if (!draggedCard) return;
+                // Capture draggedCard locally before handleDragEnd nulls it
+                const card = draggedCard;
+                const srcCol = sourceColumn;
                 
-                const proposalId = draggedCard.dataset.proposalId;
+                if (!card) return;
+                
+                const proposalId = card.dataset.proposalId;
                 const newColumnId = column.dataset.columnId;
-                const oldColumnId = sourceColumn.dataset.columnId;
+                const oldColumnId = srcCol.dataset.columnId;
 
                 // Don't allow same-column drops
                 if (oldColumnId === newColumnId) {
@@ -2495,7 +2603,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     return;
                 }
 
-                draggedCard.classList.add('is-loading');
+                card.classList.add('is-loading');
 
                 try {
                     const response = await fetch(`${API_BASE}/api/workflow/transition`, {
@@ -2522,12 +2630,16 @@ document.addEventListener('DOMContentLoaded', () => {
                         } else {
                             showError(detail);
                             // Snap card back to original position
-                            draggedCard.classList.remove('is-loading');
+                            if (document.contains(card)) {
+                                card.classList.remove('is-loading');
+                            }
                         }
                     }
                 } catch (err) {
                     showError(`Network error: ${err.message}`);
-                    draggedCard.classList.remove('is-loading');
+                    if (document.contains(card)) {
+                        card.classList.remove('is-loading');
+                    }
                 }
             });
         }
@@ -2715,6 +2827,10 @@ document.addEventListener('DOMContentLoaded', () => {
                                     style="background: none; border: 1px solid var(--border-color); color: var(--text-color); padding: 6px 12px; border-radius: 4px; cursor: pointer; transition: all 0.2s;">
                                 Alpha Handoff
                             </button>
+                            <button class="system-button" onclick="window.Kanban_loadArtifactInline(this, '${proposalId}', 'final_audit')" 
+                                    style="background: none; border: 1px solid var(--border-color); color: var(--text-color); padding: 6px 12px; border-radius: 4px; cursor: pointer; transition: all 0.2s;">
+                                Final Audit
+                            </button>
                         </div>
                         <div id="kanban-inline-doc" style="display: none; background: var(--bg-darker); padding: 15px; border-radius: 4px; border: 1px solid var(--border-color); margin-bottom: 20px; max-height: 400px; overflow-y: auto; font-family: monospace; white-space: pre-wrap; font-size: 13px;"></div>
                     `;
@@ -2842,5 +2958,41 @@ document.addEventListener('DOMContentLoaded', () => {
     })();
 
     // Initialize Kanban module - MUST be inside DOMContentLoaded since IIFE is inside it
-    Kanban.init();
+    if (window.Kanban && typeof window.Kanban.init === 'function') {
+        window.Kanban.init();
+    } else {
+        console.warn('Kanban module not yet loaded, retrying...');
+        setTimeout(() => {
+            if (window.Kanban && typeof window.Kanban.init === 'function') {
+                window.Kanban.init();
+            }
+        }, 500);
+    }
+
+    // --- DevLog Tab Functionality ---
+    const devlogGenerateBtn = document.getElementById('devlog-generate-btn');
+    if (devlogGenerateBtn) {
+        devlogGenerateBtn.addEventListener('click', async () => {
+            const dateInput = document.getElementById('devlog-date');
+            const output = document.getElementById('devlog-output');
+            const date = dateInput ? dateInput.value : new Date().toISOString().split('T')[0];
+            
+            output.innerHTML = '<em>Generating draft...</em>';
+            devlogGenerateBtn.disabled = true;
+            
+            try {
+                const response = await fetch(`/api/devlog/draft?date_str=${date}`, { method: 'POST' });
+                const data = await response.json();
+                if (data.status === 'success') {
+                    output.textContent = typeof data.draft === 'string' ? data.draft : JSON.stringify(data.draft, null, 2);
+                } else {
+                    output.innerHTML = `<span style="color:var(--lms-log-err)">Error: ${data.detail || 'Unknown error'}</span>`;
+                }
+            } catch (err) {
+                output.innerHTML = `<span style="color:var(--lms-log-err)">Network error: ${err.message}</span>`;
+            } finally {
+                devlogGenerateBtn.disabled = false;
+            }
+        });
+    }
 });  // End of DOMContentLoaded

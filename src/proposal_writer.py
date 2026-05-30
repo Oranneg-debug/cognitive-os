@@ -123,11 +123,18 @@ class ProposalWriter:
         fm_close = content.find('\n---\n', 3)  # skip opening ---
         if fm_close > 0:
             fm_extra = (
+                f"\nid: \"{proposal_id}\""
                 f"\noriginal_request: \"{user_input[:300].replace(chr(34), chr(39))}\""
                 f"\norigin: \"{origin}\""
             )
             if source_note:
                 fm_extra += f"\nsource_note: \"[[{source_note}]]\""
+            # Inject keywords if provided via llm_proposal_data
+            if llm_proposal_data and llm_proposal_data.get("keywords"):
+                kw = llm_proposal_data["keywords"]
+                kw_list = kw if isinstance(kw, list) else [str(kw)]
+                kw_yaml = ", ".join(kw_list)
+                fm_extra += f"\nkeywords: [{kw_yaml}]"
             content = content[:fm_close] + fm_extra + content[fm_close:]
 
         # ------------------------------------------------------------------
@@ -162,6 +169,9 @@ class ProposalWriter:
             if body_start > 0:
                 content = content[:body_start + 5] + source_section + content[body_start + 5:]
 
+        # Validate proposal YAML before any writes (read-only, safe to run first)
+        validate_proposal_yaml(content)
+
         # Use GovernanceUnitOfWork for atomic multi-file writes if enabled
         flags = get_integration_flags()
         
@@ -174,6 +184,10 @@ class ProposalWriter:
                 # Stage vault copy (Obsidian sync directory)
                 vault_filename = filename.replace(self.proposals_dir, self.vault_proposals_dir)
                 uow.stage_file(Path(vault_filename), content)
+
+            # After UoW completes successfully, create a snapshot of the proposal
+            handoff_vault = HandoffVault()
+            handoff_vault.snapshot(proposal_id, filename)
         else:
             # Legacy fallback: direct file writes
             print("[WARNING] GovernanceUnitOfWork is disabled - using legacy direct file writes")
@@ -183,6 +197,10 @@ class ProposalWriter:
             vault_filename = filename.replace(self.proposals_dir, self.vault_proposals_dir)
             Path(vault_filename).parent.mkdir(parents=True, exist_ok=True)
             Path(vault_filename).write_text(content, encoding='utf-8')
+
+            # Also snapshot for legacy writes
+            handoff_vault = HandoffVault()
+            handoff_vault.snapshot(proposal_id, filename)
 
         # Extract a human-readable title for the Kanban card metadata
         card_title = self._extract_card_title(user_input)
@@ -205,7 +223,11 @@ class ProposalWriter:
 
         # Add card to SQLite kanban store (single source of truth — the
         # vault Dev-KanBan.md mirror was deleted 2026-05-26).
-        self._add_card_to_store(proposal_id, prefix, card_title, origin, severity)
+        keywords = None
+        if llm_proposal_data and llm_proposal_data.get("keywords"):
+            kw = llm_proposal_data["keywords"]
+            keywords = ",".join(kw) if isinstance(kw, list) else str(kw)
+        self._add_card_to_store(proposal_id, prefix, card_title, origin, severity, keywords)
 
         proposal_data = {
             "proposal_id": proposal_id,
@@ -276,6 +298,7 @@ class ProposalWriter:
         title: str,
         origin: str,
         severity: str | None = None,
+        keywords: str | None = None,
     ) -> bool:
         """
         Add a new proposal card to the SQLite kanban store (for dashboard).
@@ -285,6 +308,8 @@ class ProposalWriter:
             prefix: The prefix (DEV, ARCH, NLST)
             title: Short title for the card
             origin: Where the proposal came from (telegram, obsidian, etc.)
+            severity: high/medium/low
+            keywords: Comma-separated tags for dashboard search
 
         Returns:
             True if successful, False otherwise
@@ -306,6 +331,7 @@ class ProposalWriter:
                     substatus=None,
                     severity=severity,
                     origin=origin or "unknown",
+                    keywords=keywords,
                     approver="system",
                     reason="Proposal created",
                 ))

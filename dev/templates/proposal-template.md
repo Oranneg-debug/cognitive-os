@@ -1,8 +1,10 @@
 ---
 status: pending
 phase: backlog
+id: "<PROPOSAL_ID>"
 origin: "<ORIGIN>"
 prefix: "<PREFIX>"
+keywords: []
 ---
 
 # <PREFIX> PROPOSAL

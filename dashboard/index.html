@@ -84,6 +84,7 @@
                     <button class="tab-link" data-tab="config">Models & Roles</button>
                     <button class="tab-link" data-tab="lmstudio">LM Studio</button>
                     <button class="tab-link" data-tab="system">System</button>
+                    <button class="tab-link" data-tab="devlog">DevLog</button>
                 </div>
                 <div class="config-actions is-hidden">
                     <button id="save-btn" class="save-btn" disabled>Save Configuration</button>
@@ -160,6 +161,13 @@
                         <ul id="models-list">
                             <!-- Models will be dynamically inserted here -->
                         </ul>
+                    </div>
+                    <!-- Council Topology Visualization (D1) -->
+                    <div class="config-topology">
+                        <h3>Council Flow</h3>
+                        <div id="council-topology">
+                            <p class="placeholder">Loading council topology...</p>
+                        </div>
                     </div>
                     <div class="config-main">
                         <h1 id="config-title">Select a Role or Model to Configure</h1>
@@ -545,6 +553,25 @@
                             <!-- Columns will be injected here -->
                         </div>
                     </section>
+                </div>
+            </div>
+
+            <div id="devlog" class="tab-content">
+                <div class="devlog-page">
+                    <h2>📝 DevLog</h2>
+                    <p style="color: var(--text-color); margin-bottom: 16px;">
+                        Generate a build-in-public devlog post from today's evidence.
+                        Posts go to the vault inbox and publish queue. Requires human approval before publishing.
+                    </p>
+                    <div style="display: flex; gap: 10px; margin-bottom: 16px;">
+                        <input type="date" id="devlog-date" style="background: var(--input-bg); border: 1px solid var(--border-color); color: var(--text-color); padding: 6px 12px; border-radius: 4px;">
+                        <button id="devlog-generate-btn" class="system-button" style="background: var(--button-bg); color: var(--button-text); padding: 6px 16px; border: none; border-radius: 4px; cursor: pointer;">
+                            Generate Draft
+                        </button>
+                    </div>
+                    <div id="devlog-output" style="background: var(--bg-darker); border: 1px solid var(--border-color); border-radius: 4px; padding: 15px; min-height: 200px; font-family: monospace; font-size: 13px; white-space: pre-wrap; overflow-y: auto; max-height: 500px;">
+                        <em>Click "Generate Draft" to create today's devlog post.</em>
+                    </div>
                 </div>
             </div>
         </main>

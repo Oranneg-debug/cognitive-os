@@ -242,3 +242,40 @@ class LLMClient:
 
 # Singleton instance for easy import
 llm = LLMClient()
+
+
+def flush_vram(force_all: bool = False) -> None:
+    """
+    Top-level function to flush VRAM by ejecting all loaded models.
+    Wraps the singleton LLMClient.eject_all_models() method.
+    
+    Args:
+        force_all: If True, bypasses the shield and unloads embedding models as well.
+    """
+    llm.eject_all_models(force_all=force_all)
+
+
+def restore_default_role() -> None:
+    """
+    Top-level function to restore the default role configuration via LM Studio CLI.
+    Uses subprocess.Popen with shell=True for fire-and-forget behavior.
+    This is the extracted _restore_default_state from orchestrator.py.
+    """
+    import subprocess
+    import os
+    
+    # Use the lms CLI to restore the default profile
+    command = 'lms profile apply default'
+    
+    try:
+        print(f"[RESTORE_ROLE] Executing: {command}")
+        subprocess.Popen(
+            command,
+            shell=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            stdin=subprocess.DEVNULL
+        )
+        print("[RESTORE_ROLE] Restore command dispatched (fire-and-forget).")
+    except Exception as e:
+        print(f"[RESTORE_ROLE] Failed to dispatch restore command: {e}")
