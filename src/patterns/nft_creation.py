@@ -1,8 +1,11 @@
 """NFT Creation pattern: NFT Metadata generation + Minting simulation."""
-from src.patterns import PatternRequest
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from src.patterns import PatternRequest
 
 
-def execute(req: PatternRequest) -> str:
+def execute(req: 'PatternRequest') -> str:
     """
     Execute an NFT Creation pattern.
     

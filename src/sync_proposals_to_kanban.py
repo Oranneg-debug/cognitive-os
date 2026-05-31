@@ -47,6 +47,8 @@ def extract_metadata(file_path: Path) -> Dict[str, Any]:
         if id_match:
             proposal_id = id_match.group(0)
             
+    keywords = _serialize_keywords(metadata.get('keywords'))
+    
     return {
         "proposal_id": proposal_id,
         "prefix": metadata.get('prefix', proposal_id.split('-')[0] if proposal_id else "DEV"),
@@ -55,27 +57,47 @@ def extract_metadata(file_path: Path) -> Dict[str, Any]:
         "substatus": metadata.get('substatus', metadata.get('status', 'pending')),
         "severity": metadata.get('severity', 'medium'),
         "origin": metadata.get('origin', 'unknown'),
-        "keywords": _serialize_keywords(metadata.get('keywords')),
+        "keywords": keywords,
+        "_keywords_warning": None if keywords else f"No keywords in frontmatter — add 'keywords: [\"tag1\", \"tag2\"]' to {file_path.name}",
     }
 
 
 def _serialize_keywords(keywords) -> Optional[str]:
-    """Normalize keywords from YAML (list) to SQLite (comma-separated string)."""
+    """Normalize keywords from YAML (list) to SQLite (comma-separated string).
+
+    Returns None if keywords are missing, empty, or still contain the
+    template placeholder values (meaning the proposal author forgot
+    to fill them in).
+    """
     if not keywords:
         return None
     if isinstance(keywords, str):
         return keywords
     if isinstance(keywords, list):
-        return ",".join(str(k).strip() for k in keywords if k)
+        # Filter out template placeholder values
+        real = [str(k).strip() for k in keywords if k
+                and str(k).strip() not in KNOWN_TEMPLATE_PLACEHOLDERS]
+        return ",".join(real) if real else None
     return str(keywords)
+
+
+# Template placeholder values that indicate an author forgot to fill in keywords.
+KNOWN_TEMPLATE_PLACEHOLDERS = frozenset([
+    "searchable-tag-1",
+    "searchable-tag-2",
+    "tag-1",
+    "tag-2",
+    "<KEYWORDS>",
+])
 
 
 async def sync_proposal(store: KanbanStore, proposal_id: str) -> bool:
     """Sync a single proposal by ID."""
-    # Look for the file
     for file_path in PROPOSALS_DIR.glob(f"*{proposal_id}*.md"):
         meta = extract_metadata(file_path)
         if meta["proposal_id"] == proposal_id:
+            if meta.get("_keywords_warning"):
+                print(f"  ⚠️  {meta['_keywords_warning']}")
             await store.add_card(
                 proposal_id=meta["proposal_id"],
                 prefix=meta["prefix"],

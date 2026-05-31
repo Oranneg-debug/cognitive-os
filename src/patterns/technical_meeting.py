@@ -1,5 +1,9 @@
 """Technical Meeting pattern: Draft → Expand → Refine → Synthesize pipeline."""
-from src.patterns import PatternRequest
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from src.patterns import PatternRequest
+
 from src.council_runner import run_council
 
 
@@ -13,7 +17,7 @@ ROLES = [
 SYNTHESIS_ROLE = "chief_technical_officer"
 
 
-def execute(req: PatternRequest) -> str:
+def execute(req: 'PatternRequest') -> str:
     """
     Execute a technical meeting pattern with sequential deliberation.
     
@@ -54,6 +58,7 @@ def execute(req: PatternRequest) -> str:
         progress_callback=req.progress_callback,
         output_router=req.output_router,
         memory=memory,
+        brand_guard_enabled=False,  # Compass injected; avoid extra load/unload cycles
     )
     
     return report

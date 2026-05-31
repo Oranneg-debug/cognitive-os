@@ -78,7 +78,6 @@ models:
     top_p: 0.95
     min_p: 0.1
     flash_attention: true
-    n_parallel: 1
   ministral-3-3b-instruct-2512:
     context_window: 131072
     gpu_offload_ratio: max
@@ -164,9 +163,12 @@ roles:
     context_window: 125000
     gpu_offload_ratio: 'off'
     enabled: true
-    n_parallel: 2
     reasoning_enabled: false
     batch_size: 1024
+    n_parallel: '1'
+    flash_attention: 'true'
+    v_cache_quant: f16
+    k_cache_quant: f16
   standard:
     model: qwen3.5-9b-claude-4.6-highiq-instruct-heretic-uncensored
     compass_weight: IGNORE
@@ -174,43 +176,53 @@ roles:
     context_window: 128000
     max_tokens: 16000
     reasoning_enabled: true
-    n_parallel: 2
+    min_p: '0.1'
+    repeat_penalty: '1'
+    top_k: '30'
+    top_p: '0.9'
+    temperature: '0.7'
   vision:
     model: qwen3-vl-4b-thinking
     compass_weight: IGNORE
     system_prompt: "You are an expert image analyst. Provide a detailed, accurate description and analysis of the provided image.\n# HANDOFF PROTOCOL\nOutput ONLY valid JSON:\n{\n    \"analysis\": \"Visual description.\",\n    \"key_elements\": [\"list\", \"of\", \"items\"],\n    \"actionable_insights\": [\"insights\"]\n}\n"
+    k_cache_quant: f16
+    v_cache_quant: f16
+    flash_attention: 'true'
+    n_parallel: '1'
   scribe:
     model: ministral-3-3b-instruct-2512
     compass_weight: IGNORE
     system_prompt: Distill the deliberation into a beautiful markdown report.
-    temperature: '0.2'
+    temperature: 0.2
     top_p: 0.9
     top_k: 40
     repeat_penalty: 1
     min_p: 0.1
     max_tokens: 15000
-    context_window: '64000'
+    context_window: 64000
     gpu_offload_ratio: max
-    n_parallel: 1
     k_cache_quant: f16
     v_cache_quant: f16
-    batch_size: '4096'
+    batch_size: 4096
+    flash_attention: 'true'
+    n_parallel: '1'
   moderator:
     model: qwen3.5-2b
     compass_weight: IGNORE
     system_prompt: "You are the Orchestrator Moderator \u2014 a neutral, efficient facilitator who ensures smooth role transitions.\n# HANDOFF PROTOCOL\nOutput ONLY valid JSON:\n{\n    \"next_role\": \"role_key\",\n    \"transition_reason\": \"Why this role is next.\",\n    \"context_summary\": \"Summary of current state.\"\n}\n"
-    gpu_offload_ratio: 'off'
-    context_window: '32000'
+    gpu_offload_ratio: 0.1
+    context_window: 32000
     max_tokens: 2048
     min_p: 0.1
     repeat_penalty: 1
     top_k: 40
     top_p: 0.9
-    temperature: '0.2'
-    n_parallel: 4
-    k_cache_quant: f16
-    v_cache_quant: f16
-    batch_size: '2048'
+    temperature: 0.2
+    k_cache_quant: q4_0
+    v_cache_quant: q4_0
+    batch_size: 2048
+    flash_attention: 'true'
+    n_parallel: '1'
   brand_guard:
     model: qwen3.5-2b
     compass_weight: MAXIMUM WEIGHT
@@ -220,17 +232,14 @@ roles:
     top_k: 65
     repeat_penalty: 1.1
     min_p: 0.1
-    max_tokens: '1024'
+    max_tokens: 1024
     context_window: 32768
-    gpu_offload_ratio: 0
-    n_parallel: 4
-    batch_size: '2048'
-  nft_specialist:
-    model: qwen3-coder-next
-    compass_weight: HIGH WEIGHT
-    system_prompt: 'NFT metadata specialist.
-
-      '
+    gpu_offload_ratio: 0.1
+    batch_size: 2048
+    k_cache_quant: q4_0
+    v_cache_quant: q4_0
+    n_parallel: '1'
+    flash_attention: 'true'
   dev_beta_council:
     model: qwen3.6-35b-a3b-uncensored-hauhaucs-aggressive
     temperature: 1
@@ -266,10 +275,13 @@ roles:
     reasoning_enabled: true
     context_window: 16000
     gpu_offload_ratio: max
-    n_parallel: 2
     batch_size: 4096
+    n_parallel: '1'
+    flash_attention: 'true'
+    v_cache_quant: f16
+    k_cache_quant: f16
   dev_alpha_polish:
-    model: zai-org/glm-4.6v-flash
+    model: qwen3.6-27b-heretic-uncensored-finetune-neo-code-di-imatrix-max
     temperature: 1
     compass_weight: HIGH WEIGHT
     system_prompt: 'You are the Alpha Polish specialist, an expert in UI/UX refinement and code performance optimization.
@@ -294,50 +306,34 @@ roles:
     repeat_penalty: 1
     min_p: 0.05
     max_tokens: 8192
-    context_window: '32000'
+    context_window: 32000
     gpu_offload_ratio: max
     reasoning_enabled: true
-    n_parallel: '1'
-    batch_size: '4096'
+    batch_size: 4096
+    k_cache_quant: f16
+    v_cache_quant: f16
+    flash_attention: true
+    n_parallel: 1
   dev_final_audit:
     model: deepseek-r1-distill-llama-70b
-    temperature: 0.3
+    temperature: 0.5
     compass_weight: HIGH WEIGHT
-    system_prompt: 'You are the Final Auditor, responsible for the ultimate quality gate before release.
-
-      Your analysis must be returned as a single, valid JSON object. Do not include any other text or explanations.
-
-      Your audit must evaluate against the following criteria:
-
-      1.  **Documentation Quality**: Is the code well-documented? Is the release report clear?
-
-      2.  **Brand Guardrail Adherence**: Does the final product align with the project''s brand and aesthetic guidelines?
-
-      3.  **Improvement Gaps**: Are there any remaining gaps or potential areas for future improvement?
-
-      4.  **System-Wide Assessment**: Provide a brief assessment of how this change impacts the overall system (CognitiveOS & Obsidian-LMStudio-Agent).
-
-      The JSON object must contain the following keys:
-
-      - "final_verdict": (string) Must be "APPROVED" or "REJECTED".
-
-      - "justification": (string) A detailed justification for your verdict, referencing the audit criteria.
-
-      - "release_notes": (string) Final, polished release notes for the project.
-
-      '
+    system_prompt: "You are the Final Auditor \u2014 the last gate before a proposal ships.\nYou are given the proposal text, its alpha handoff, and the scribe's\ndraft release notes. Your job is binary: APPROVE or REJECT.\n\nBase your verdict on CONCRETE evidence, not vibes:\n\n1. ACCEPTANCE CRITERIA VERIFICATION\n   The proposal contains an `\u2705 Acceptance Criteria` table.\n   Verify EVERY row. If any row's \"Pass when\" condition is not\n   demonstrably met from the handoff evidence, REJECT.\n\n2. HANDOFF COMPLETENESS\n   The handoff frontmatter must have `tasks_completed` == `tasks_total`.\n   All `- [ ]` checkboxes in `## \U0001F527 Implementation Tasks` must be `- [x]`.\n   If any task is incomplete, REJECT.\n\n3. GATE REGRESSION CHECK\n   If the handoff includes `alpha_polish_check.py` results, the gate\n   count must be the same or higher than the proposal's target.\n   If any gate dropped, REJECT.\n\n4. SCRIBE ACCURACY\n   The scribe drafted release notes. Verify they reflect the proposal's\n   actual goal, changes, and affected files. If they hallucinate a feature\n   or omit a key change, REJECT.\n\nReturn a single valid JSON object (NO markdown fences, NO trailing text):\n\n{\n  \"final_verdict\": \"APPROVED\" or \"REJECTED\",\n  \"justification\": \"Which criteria passed, which failed, and why.\",\n  \"failed_criteria\": [\"criterion name if any, else empty list\"],\n  \"release_notes_audit\": \"ACCEPTED as-is, or REJECTED with specific corrections needed.\",\n  \"recommendations\": [\"actionable fixes if any, else empty list\"]\n}\n\nNOTE: This prompt is STAGE 1. When ARCH-B1D2E3F4 (Runtime Smoke Gates)\nand DEV-D5E6F7A8 (Dual-Vault Separation) ship, a STAGE 2 upgrade adds\nsmoke-gate verification (S1\u2013S8) and cross-vault integrity checks. For\nnow, evaluate proposals against the 4 criteria above only.\n"
     top_p: 0.9
     top_k: 40
     repeat_penalty: 1.1
-    min_p: 0.05
-    max_tokens: '8096'
-    context_window: '32000'
+    min_p: 0.1
+    max_tokens: 8192
+    context_window: 32768
     gpu_offload_ratio: max
-    n_parallel: 1
     reasoning_enabled: true
     batch_size: 4096
+    flash_attention: true
+    k_cache_quant: q8_0
+    v_cache_quant: q8_0
+    n_parallel: '1'
   alpha_ux_specialist:
-    model: qwen3-coder-next
+    model: zai-org/glm-4.6v-flash
     compass_weight: HIGH WEIGHT
     system_prompt: 'You are the Alpha UX Specialist, focused on UI/UX friction, accessibility, and visual feedback.
 
@@ -354,15 +350,16 @@ roles:
     repeat_penalty: 1.1
     min_p: 0.05
     max_tokens: 8192
-    context_window: '32000'
+    context_window: 32000
     gpu_offload_ratio: max
-    n_parallel: 1
     reasoning_enabled: true
-    batch_size: '4096'
+    batch_size: 4096
     k_cache_quant: f16
     v_cache_quant: f16
+    flash_attention: true
+    n_parallel: 1
   alpha_perf_specialist:
-    model: qwen3.5-35b-a3b-uncensored-hauhaucs-aggressive
+    model: qwen3-coder-next
     compass_weight: HIGH WEIGHT
     system_prompt: 'You are the Alpha Performance Specialist, focused on algorithmic bottlenecks, latency, and memory leaks.
 
@@ -379,13 +376,14 @@ roles:
     repeat_penalty: 1.1
     min_p: 0.05
     max_tokens: 8192
-    context_window: '32000'
+    context_window: 32000
     gpu_offload_ratio: max
-    n_parallel: 1
     reasoning_enabled: true
-    batch_size: '4096'
+    batch_size: 4096
     k_cache_quant: f16
     v_cache_quant: f16
+    flash_attention: true
+    n_parallel: 1
   alpha_critic:
     model: deepseek-r1-distill-qwen-32b-uncensored
     compass_weight: HIGH WEIGHT
@@ -404,14 +402,17 @@ roles:
     repeat_penalty: 1.1
     min_p: 0.05
     max_tokens: 8192
-    context_window: '32000'
+    context_window: 32000
     gpu_offload_ratio: max
-    n_parallel: 1
     reasoning_enabled: true
-    batch_size: '4096'
+    batch_size: 4096
+    k_cache_quant: q8_0
+    v_cache_quant: q8_0
+    flash_attention: true
+    n_parallel: 1
   final_scribe:
     model: ministral-3-3b-instruct-2512
-    compass_weight: HIGH WEIGHT
+    compass_weight: IGNORE
     system_prompt: 'You are the Final Scribe, responsible for generating comprehensive release notes and documentation.
 
       Your analysis must be returned as a single, valid JSON object. Do not include any other text or explanations.
@@ -427,64 +428,73 @@ roles:
     repeat_penalty: 1
     min_p: 0.1
     max_tokens: 16384
-    context_window: '64000'
+    context_window: 64000
     gpu_offload_ratio: max
-    n_parallel: 1
-    reasoning_enabled: true
-    batch_size: '4096'
+    reasoning_enabled: false
+    batch_size: 4096
+    k_cache_quant: f16
+    v_cache_quant: f16
+    flash_attention: true
+    n_parallel: '1'
   board_strategist:
     model: deepseek-r1-distill-llama-70b
     compass_weight: MEDIUM WEIGHT
     system_prompt: "### SYSTEM ROLE: THE STRATEGIST (HERMES-4-70B)\nYou are the Executive Strategist / First Principles thinker of the \"Dark Maestro\" Boardroom.\n# HANDOFF PROTOCOL\nOutput ONLY valid JSON:\n{\n    \"strategic_view\": \"Your vision.\",\n    \"key_levers\": [\"list of levers\"],\n    \"veto_points\": [],\n    \"next_step\": \"Proposed path.\"\n}\n"
-    gpu_offload_ratio: max
-    n_parallel: 1
+    gpu_offload_ratio: 0.9
     temperature: 0.3
     top_p: 0.95
     top_k: 30
     repeat_penalty: 1.1
     min_p: 0.1
     max_tokens: 8096
-    context_window: '32001'
+    context_window: 32001
     reasoning_enabled: true
-    batch_size: '4096'
+    batch_size: 2048
+    n_parallel: '1'
+    flash_attention: 'true'
+    v_cache_quant: q8_0
+    k_cache_quant: q8_0
   board_specialist:
     model: qwen3.6-27b-heretic-uncensored-finetune-neo-code-di-imatrix-max
     compass_weight: LOW WEIGHT
     system_prompt: "### SYSTEM ROLE: THE SPECIALIST (QWEN3.6-27B)\nYou are the Technical / Executor Specialist for the \"Dark Maestro\" Boardroom.\n# HANDOFF PROTOCOL\nOutput ONLY valid JSON:\n{\n    \"technical_analysis\": \"Precision detail.\",\n    \"actionable_steps\": [\"step 1\", \"step 2\"],\n    \"veto_points\": [],\n    \"next_step\": \"Refinement suggestion.\"\n}\n"
-    n_parallel: '1'
     repeat_penalty: 1
     min_p: 0.05
     top_k: 22
     top_p: 0.95
     temperature: 0.2
-    max_tokens: '8192'
-    context_window: '32000'
+    max_tokens: 8192
+    context_window: 32000
     gpu_offload_ratio: max
     reasoning_enabled: true
     k_cache_quant: f16
     v_cache_quant: f16
-    batch_size: '4096'
+    batch_size: 4096
+    n_parallel: '1'
+    flash_attention: 'true'
   board_critic:
     model: deepseek-r1-distill-qwen-32b-uncensored
     compass_weight: IGNORE
     system_prompt: "### SYSTEM ROLE: THE CRITIC (DEEPSEEK-R1-32B)\nYou are the Ruthless Critic / Contrarian of the \"Dark Maestro\" Boardroom.\n# HANDOFF PROTOCOL\nOutput ONLY valid JSON:\n{\n    \"veto_points\": [{\"type\": \"logic|aesthetic|technical\", \"risk_level\": \"low|medium|high\", \"description\": \"...\"}],\n    \"critical_feedback\": \"Detailed breakdown.\",\n    \"next_step\": \"Mitigation request.\"\n}\n"
-    n_parallel: '1'
     temperature: 0.2
     top_p: 0.95
     top_k: 45
     repeat_penalty: 1.1
     min_p: 0.05
     max_tokens: 4096
-    context_window: '32000'
+    context_window: 32000
     gpu_offload_ratio: max
     reasoning_enabled: true
-    batch_size: '4096'
+    batch_size: 4096
+    n_parallel: '1'
+    k_cache_quant: q8_0
+    v_cache_quant: q8_0
+    flash_attention: 'true'
   board_creative:
     model: hermes-4.3-36b-heretic-i1
     compass_weight: MAXIMUM WEIGHT
     system_prompt: "### SYSTEM ROLE: THE CREATIVE (HERMES-4.3-36B HERETIC)\nYou are the Creative Expansionist for the \"Dark Maestro\" Boardroom.\n# HANDOFF PROTOCOL\nOutput ONLY valid JSON:\n{\n    \"creative_vision\": \"Provocative idea.\",\n    \"style_notes\": \"Aesthetic cues.\",\n    \"veto_points\": [],\n    \"next_step\": \"Expansion.\"\n}\n"
-    n_parallel: 1
-    temperature: '1'
+    temperature: 1
     top_p: 0.95
     top_k: 20
     repeat_penalty: 1
@@ -494,43 +504,52 @@ roles:
     gpu_offload_ratio: max
     flash_attention: true
     reasoning_enabled: true
-    batch_size: '4096'
+    batch_size: 4096
+    n_parallel: '1'
+    v_cache_quant: q8_0
+    k_cache_quant: q8_0
   board_logical:
     model: gemma-4-31b-it
     compass_weight: LOW WEIGHT
     system_prompt: "### SYSTEM ROLE: THE LOGICAL (GEMMA-4-31B)\nYou are the Formalist Outsider and Scribe.\n# HANDOFF PROTOCOL\nOutput ONLY valid JSON:\n{\n    \"logical_structure\": \"Step-by-step proof.\",\n    \"validity_score\": 1.0,\n    \"veto_points\": [],\n    \"next_step\": \"Decision point.\"\n}\n"
-    n_parallel: '1'
     temperature: 0.3
     top_p: 0.95
     top_k: 65
     repeat_penalty: 1.1
     min_p: 0.05
     max_tokens: 4096
-    context_window: '32000'
+    context_window: 32000
     gpu_offload_ratio: max
     reasoning_enabled: true
-    batch_size: '4096'
+    batch_size: 4096
+    n_parallel: '1'
+    flash_attention: 'true'
+    v_cache_quant: f16
+    k_cache_quant: f16
   board_chairman:
     model: hermes-4-70b
     compass_weight: MAXIMUM WEIGHT
-    system_prompt: "### SYSTEM ROLE: THE GOD-TIER CHAIRMAN (HERMES-4-70B)\nYou are the ultimate authority. Reconcile all inputs through the Sovereign Compass.\n# HANDOFF PROTOCOL\nOutput ONLY valid JSON:\n{\n    \"audit_report\": \"What was missed.\",\n    \"definitive_blueprint\": \"The path forward.\",\n    \"final_decision\": \"The verdict.\",\n    \"veto_points\": []\n}\n"
-    n_parallel: 1
-    temperature: '0.7'
+    system_prompt: "### SYSTEM ROLE: THE GOD-TIER CHAIRMAN (HERMES-4-70B)\nYou are the ultimate authority. Reconcile all inputs through the Sovereign Compass.\n# HANDOFF PROTOCOL\nOutput ONLY valid JSON:\n{\n    \"audit_report\": \"What was missed. Full analysis, no truncation.\",\n    \"definitive_blueprint\": \"The path forward with detailed reasoning.\",\n    \"final_decision\": \"The verdict with full justification.\",\n    \"veto_points\": []\n}\n"
+    temperature: 0.7
     top_p: 0.9
     top_k: 30
     repeat_penalty: 1
     min_p: 0.1
-    max_tokens: 4096
-    context_window: '32000'
+    max_tokens: 16384
+    context_window: 48000
     gpu_offload_ratio: max
     reasoning_enabled: true
-    batch_size: '4096'
+    batch_size: 4096
+    n_parallel: '1'
+    flash_attention: 'true'
+    v_cache_quant: q8_0
+    k_cache_quant: q8_0
   technical_specialist:
     model: qwen3.6-27b-heretic-uncensored-finetune-neo-code-di-imatrix-max
     compass_weight: LOW WEIGHT
     system_prompt: "### SYSTEM ROLE: THE TECHNICAL SPECIALIST\nAs the specialist in a technical meeting, focus purely on implementation details, code quality, and architectural soundness.\n# HANDOFF PROTOCOL\nOutput ONLY valid JSON:\n{\n    \"technical_analysis\": \"Precision detail.\",\n    \"actionable_steps\": [\"step 1\", \"step 2\"],\n    \"veto_points\": [],\n    \"next_step\": \"Refinement suggestion.\"\n}\n"
     max_tokens: 8096
-    context_window: '32000'
+    context_window: 32000
     gpu_offload_ratio: max
     min_p: 0.05
     repeat_penalty: 1.1
@@ -538,25 +557,11 @@ roles:
     top_p: 0.95
     temperature: 0.2
     reasoning_enabled: true
-    n_parallel: 1
-    batch_size: '4096'
+    batch_size: 4096
     k_cache_quant: f16
     v_cache_quant: f16
-  technical_creative:
-    model: hermes-4.3-36b-heretic-i1
-    compass_weight: HIGH WEIGHT
-    system_prompt: "### SYSTEM ROLE: THE TECHNICAL CREATIVE\nAs the creative in a technical meeting, propose novel architectural approaches, innovative algorithms, or unconventional solutions to technical problems.\n# HANDOFF PROTOCOL\nOutput ONLY valid JSON:\n{\n    \"architectural_innovation\": \"Novel technical approach.\",\n    \"veto_points\": [],\n    \"next_step\": \"Feasibility audit.\"\n}\n"
-    temperature: 1
-    top_p: 0.95
-    top_k: 20
-    repeat_penalty: 1
-    min_p: 0.1
-    max_tokens: 8096
-    context_window: 32002
-    gpu_offload_ratio: max
-    reasoning_enabled: true
-    n_parallel: 1
-    batch_size: '4096'
+    n_parallel: '1'
+    flash_attention: 'true'
   technical_critic:
     model: deepseek-r1-distill-qwen-32b-uncensored
     compass_weight: IGNORE
@@ -566,12 +571,15 @@ roles:
     min_p: 0
     top_p: 0.95
     max_tokens: 8096
-    context_window: '32000'
+    context_window: 32000
     gpu_offload_ratio: max
     temperature: 0.3
     reasoning_enabled: true
-    n_parallel: 1
-    batch_size: '4096'
+    batch_size: 4096
+    k_cache_quant: f16
+    v_cache_quant: f16
+    flash_attention: 'true'
+    n_parallel: '1'
   drafting_architect:
     model: deepseek-r1-distill-llama-70b
     compass_weight: LOW WEIGHT
@@ -582,10 +590,13 @@ roles:
     repeat_penalty: 1.1
     min_p: 0.05
     max_tokens: 8192
-    context_window: '32000'
+    context_window: 32000
     gpu_offload_ratio: max
     reasoning_enabled: true
-    batch_size: '4096'
+    batch_size: 4096
+    k_cache_quant: q8_0
+    v_cache_quant: q8_0
+    flash_attention: 'true'
     n_parallel: '1'
   creative_expansionist:
     model: hermes-4.3-36b-heretic-i1
@@ -600,48 +611,34 @@ roles:
     context_window: 32001
     gpu_offload_ratio: max
     reasoning_enabled: true
-    batch_size: '4096'
+    batch_size: 4096
+    k_cache_quant: f16
+    v_cache_quant: f16
+    flash_attention: 'true'
     n_parallel: '1'
   chief_technical_officer:
-    model: gemma-4-31b-it
+    model: unsloth/hermes-4-70b
     compass_weight: HIGH WEIGHT
     system_prompt: "### SYSTEM ROLE: THE CHIEF TECHNICAL OFFICER\nYou are the Chief Technical Officer. Synthesize the architect's blueprint, the expansionist's ideas, and the critic's warnings into a definitive, production-ready technical plan.\n# HANDOFF PROTOCOL\nOutput ONLY valid JSON:\n{\n    \"audit_report\": \"What was covered and what was missed.\",\n    \"definitive_blueprint\": \"The final technical plan.\",\n    \"implementation_tasks\": [\"task 1\", \"task 2\"],\n    \"veto_points\": []\n}\n"
-    temperature: 0.1
+    temperature: '0.2'
     top_p: 0.95
     top_k: 40
     repeat_penalty: 1.1
     min_p: 0.05
     max_tokens: 4096
-    context_window: '32000'
+    context_window: 32000
     gpu_offload_ratio: max
     reasoning_enabled: true
-    n_parallel: 1
-    batch_size: '4096'
-    k_cache_quant: f16
-    v_cache_quant: f16
-  technical_overseer:
-    model: gemma-4-31b-it
-    compass_weight: LOW WEIGHT
-    system_prompt: "### SYSTEM ROLE: THE TECHNICAL OVERSEERS\nAudit the technical logic. Reconcile Specialist and Creative inputs to produce a definitive, verified technical blueprint.\n# HANDOFF PROTOCOL\nOutput ONLY valid JSON:\n{\n    \"audit_report\": \"Technical gaps.\",\n    \"definitive_blueprint\": \"Verified logic.\",\n    \"veto_points\": []\n}\n"
-    temperature: 0.4
-    top_p: 0.95
-    top_k: 40
-    repeat_penalty: 1.1
-    min_p: 0.05
-    max_tokens: 8096
-    context_window: '32000'
-    gpu_offload_ratio: max
-    enabled: true
-    k_cache_quant: f16
-    v_cache_quant: f16
-    n_parallel: 1
-    reasoning_enabled: true
-    batch_size: '4096'
+    batch_size: 4096
+    k_cache_quant: q8_0
+    v_cache_quant: q8_0
+    flash_attention: 'true'
+    n_parallel: '1'
   design_junior:
     model: zai-org/glm-4.6v-flash
     compass_weight: HIGH WEIGHT
     system_prompt: "### SYSTEM ROLE: DESIGN JUNIOR\nTranslate project data into 3 distinct visual and narrative concepts.\n# HANDOFF PROTOCOL\nOutput ONLY valid JSON:\n{\n    \"concepts\": [{\"design_title\": \"...\", \"narrative_hook\": \"...\", \"visual_reference_prompt\": \"...\"}]\n}\n"
-    temperature: 1
+    temperature: 0.8
     top_p: 0.95
     top_k: 40
     repeat_penalty: 1
@@ -649,7 +646,7 @@ roles:
     max_tokens: 2048
     context_window: 65536
     gpu_offload_ratio: max
-    n_parallel: 1
+    reasoning_enabled: true
   design_creative:
     model: hermes-4.3-36b-heretic-i1
     compass_weight: LOW WEIGHT
@@ -674,7 +671,6 @@ roles:
     max_tokens: 2048
     context_window: 32000
     gpu_offload_ratio: max
-    n_parallel: 1
   design_senior:
     model: qwen3.6-27b-heretic-uncensored-finetune-neo-code-di-imatrix-max
     compass_weight: MEDIUM WEIGHT
@@ -697,13 +693,16 @@ roles:
     top_p: 0.9
     top_k: 40
     min_p: 0.1
-    max_tokens: '12001'
-    context_window: '32000'
+    max_tokens: 12001
+    context_window: 32000
     gpu_offload_ratio: max
-    n_parallel: 1
     enabled: true
-    batch_size: '4096'
-    repeat_penalty: '1'
+    batch_size: 4096
+    repeat_penalty: 1
+    n_parallel: '1'
+    flash_attention: 'true'
+    v_cache_quant: f16
+    k_cache_quant: f16
   oracle_member_1:
     model: qwen3.6-27b-heretic-uncensored-finetune-neo-code-di-imatrix-max
     compass_weight: IGNORE
@@ -729,29 +728,36 @@ roles:
     temperature: 0.1
     max_tokens: 8192
   devlog_scribe:
-    model: qwen3.6-14b-heretic-uncensored
-    compass_weight: IGNORE
-    system_prompt: "You are the DevLog Scribe for the Dark Maestro cognitive-os. Your task is to synthesize structured evidence (git commits, gate deltas, council verdicts, test counts) into a public-facing devlog post. Tone: direct, technical, and build-in-public. Highlight interesting decisions, not routine work. Errors and failures are featured, not hidden. Output format: markdown with title, body, 4-tweet thread, and tags.\n# HANDOFF PROTOCOL\nOutput ONLY valid JSON:\n{\n    \"title\": \"Day N: The Story\",\n    \"body_markdown\": \"Full post content in markdown.\",\n    \"tweet_thread\": [\"Tweet 1 \u2264280 chars\", \"Tweet 2 \u2264280 chars\", \"Tweet 3 \u2264280 chars\", \"Tweet 4 \u2264280 chars\"],\n    \"tags\": [\"tag1\", \"tag2\", \"tag3\"]\n}\n"
+    model: ministral-3-3b-instruct-2512
+    compass_weight: HIGH WEIGHT
+    system_prompt: "You are the DevLog Scribe for the Dark Maestro cognitive-os. Synthesize structured evidence into a public-facing devlog post. Tone: direct, technical, build-in-public. Feature errors and failures, not just successes.\n# HANDOFF PROTOCOL\nWrap your ENTIRE response in a ```json code block. ALL newlines inside string values MUST be written as escaped \\n, NOT literal line breaks.\n```json\n{\n    \"title\": \"DevLog: YYYY-MM-DD - Short Title\",\n    \"body\": \"# DevLog for YYYY-MM-DD\\\\n\\\\n## What We Built\\\\n\\\\n...\",\n    \"tweet_thread\": [\n        {\"content\": \"Tweet 1 under 280 chars\", \"order\": 1},\n        {\"content\": \"Tweet 2 under 280 chars\", \"order\": 2},\n        {\"content\": \"Tweet 3 under 280 chars\", \"order\": 3},\n        {\"content\": \"Tweet 4 under 280 chars\", \"order\": 4}\n    ],\n    \"tags\": [\"#cognitivos\", \"#devlog\", \"#buildinpublic\"]\n}\n```"
     temperature: 0.7
     top_p: 0.9
     top_k: 40
     repeat_penalty: 1.1
-    min_p: 0
+    min_p: 0.1
     max_tokens: 8192
     context_window: 32768
     gpu_offload_ratio: max
     reasoning_enabled: true
-    n_parallel: 1
-    batch_size: '4096'
+    batch_size: 4096
+    k_cache_quant: f16
+    v_cache_quant: f16
+    flash_attention: 'true'
+    n_parallel: '1'
   handoff:
     planner_enabled: true
-    temperature: '0.2'
-    top_p: '0.95'
-    top_k: '40'
-    repeat_penalty: '1'
-    min_p: '0.05'
-    max_tokens: '8192'
-    context_window: '32000'
+    temperature: 0.2
+    top_p: 0.95
+    top_k: 40
+    repeat_penalty: 1
+    min_p: 0.05
+    max_tokens: 8192
+    context_window: 32000
+    batch_size: 4096
+    flash_attention: 'true'
+    v_cache_quant: f16
+    k_cache_quant: f16
+    enabled: false
     n_parallel: '1'
-    batch_size: '4096'
 ```

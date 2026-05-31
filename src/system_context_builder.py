@@ -56,8 +56,8 @@ def build_universal_context() -> str:
     # Combine all sections
     full_content = "\n\n".join(sections)
     
-    # Truncate to ~1000 tokens if needed (conservative estimate: 4 chars ≈ 1 token)
-    max_chars = 4000  # ~1000 tokens buffer
+    # Truncate to ~2000 tokens if needed (conservative estimate: 4 chars ≈ 1 token)
+    max_chars = 8000  # ~2000 tokens buffer
     if len(full_content) > max_chars:
         truncated = full_content[:max_chars]
         # Try to truncate at a natural break (newline)
@@ -72,8 +72,14 @@ def build_universal_context() -> str:
 def _get_architecture_doc() -> str:
     """Read docs/SYSTEM_ARCHITECTURE.md (first 100 lines + Mermaid extraction)."""
     try:
-        docs_dir = Path(__file__).parent.parent / "docs"
-        arch_path = docs_dir / "SYSTEM_ARCHITECTURE.md"
+        # Try cognitive-os/docs first, then parent repo docs/
+        src_dir = Path(__file__).parent
+        for candidate in [src_dir.parent / "docs", src_dir.parent.parent / "docs"]:
+            arch_path = candidate / "SYSTEM_ARCHITECTURE.md"
+            if arch_path.exists():
+                break
+        else:
+            return ""
         
         if not arch_path.exists():
             return ""

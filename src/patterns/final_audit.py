@@ -4,7 +4,11 @@ This pattern implements the Finalized transition gate with:
 - final_scribe: Generates comprehensive release notes
 - dev_final_audit: Outputs binary verdict (APPROVED/REJECTED)
 """
-from src.patterns import PatternRequest
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from src.patterns import PatternRequest
+
 from src.council_runner import run_council
 
 
@@ -16,7 +20,7 @@ FINAL_AUDIT_ROLES = [
 SYNTHESIS_ROLE = "dev_final_audit"
 
 
-def execute(req: PatternRequest) -> str:
+def execute(req: 'PatternRequest') -> str:
     """
     Execute the Final Audit pattern for Finalized phase quality gate.
     
@@ -52,6 +56,7 @@ def execute(req: PatternRequest) -> str:
         progress_callback=req.progress_callback,
         output_router=req.output_router,
         memory=MemoryFileManager(),
+        brand_guard_enabled=False,  # Compass injected; avoid extra load/unload cycles
     )
     
     return report

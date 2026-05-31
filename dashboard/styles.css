@@ -27,6 +27,32 @@ body {
     background-image: url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADIAAAAyCAMAAAAp4XiDAAAAUVBMVEWFhYWDg4N3d3dtbW17e3t1dXWBgYGHh4d5eXlzc3OLi4ubm5uVlZWPj4+NjY19fX2JiYl/f39sbGxVVVVTU1NtbW1paWppampmZmZlZWVmZmZmisFKAAAAG3RSTlNAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEAvEOwtAAAAYklEQVRIx+3MyQEAIAwDMCVKO6z9TDDW9vE2U6UAAAAAAMAi2Rza2bspyAgaAQAAAAAAAADgePANegJRAQAAAAAAAAAA2HwA9gN6AnEBAAAAAAAAAACL5AGoGgEBAAAAAAAAAMCL/g9gnYg1i4yS6AAAAABJRU5ErkJggg==');
 }
 
+/* Scrollbar — Dark & Streamlined */
+::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+::-webkit-scrollbar-track {
+    background: transparent;
+    border-left: 1px solid rgba(58, 57, 57, 0.3);
+}
+::-webkit-scrollbar-thumb {
+    background: rgba(201, 162, 39, 0.25);
+    border-radius: 3px;
+    transition: background 0.3s;
+}
+::-webkit-scrollbar-thumb:hover {
+    background: rgba(201, 162, 39, 0.5);
+}
+::-webkit-scrollbar-corner {
+    background: transparent;
+}
+/* Firefox */
+* {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(201, 162, 39, 0.25) transparent;
+}
+
 /* Main Layout */
 .container {
     display: flex;
@@ -145,7 +171,7 @@ header {
     text-shadow: 0 0 5px var(--highlight-color);
 }
 
-.sidebar h2, #roles-list h2, .config-sidebar h2 {
+.sidebar h2, .config-sidebar h2 {
     font-family: Georgia, 'Times New Roman', Times, serif;
     cursor: pointer;
     position: relative;
@@ -158,7 +184,7 @@ header {
     padding-bottom: 5px;
 }
 
-.sidebar h2::before, #roles-list h2::before, .config-sidebar h2::before {
+.sidebar h2::before, .config-sidebar h2::before {
     content: '▼';
     position: absolute;
     right: 10px;
@@ -166,9 +192,24 @@ header {
     transition: transform 0.2s ease-in-out;
 }
 
-.sidebar h2.collapsed::before, #roles-list h2.collapsed::before, .config-sidebar h2.collapsed::before {
+.sidebar h2.collapsed::before, .config-sidebar h2.collapsed::before {
     transform: rotate(-90deg);
 }
+
+/* #roles-list uses council-card collapse — no generic h2 collapse */
+#roles-list h2.section-divider {
+    font-family: Georgia, 'Times New Roman', serif;
+    font-size: 0.9em;
+    color: var(--lms-ink-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 12px 0 4px;
+    margin: 0;
+    border-bottom: 1px solid var(--border-color);
+    cursor: default;
+}
+#roles-list h2.section-divider::before { content: none; }
+#roles-list h2.section-divider.warning { color: #c89a3a; }
 
 .sidebar ul, .config-sidebar ul {
     list-style: none;
@@ -195,6 +236,117 @@ header {
     text-shadow: 0 0 8px rgba(0,0,0,0.5);
 }
 
+
+/* Council Cards (reorganized sidebar) */
+.council-card {
+    margin: 8px 0 12px;
+    border-left: 3px solid var(--council-accent, #c9a227);
+    border-radius: 6px;
+    background: rgba(20, 20, 24, 0.6);
+    overflow: hidden;
+    transition: border-color 0.2s;
+}
+.council-card-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.2s;
+}
+.council-card-header:hover {
+    background: rgba(201, 162, 39, 0.08);
+}
+.council-icon { font-size: 1.1em; }
+.council-name {
+    font-family: Georgia, 'Times New Roman', serif;
+    font-weight: 600;
+    color: var(--text-color);
+    flex: 1;
+}
+.council-count {
+    font-size: 0.75em;
+    color: var(--lms-ink-dim);
+    background: rgba(255,255,255,0.06);
+    padding: 2px 8px;
+    border-radius: 10px;
+}
+.council-chevron {
+    font-size: 0.7em;
+    color: var(--lms-ink-dim);
+    transition: transform 0.2s;
+}
+.council-card.collapsed .council-chevron {
+    transform: rotate(-90deg);
+}
+.council-card-desc {
+    padding: 0 12px 8px;
+    font-size: 0.78em;
+    color: #6e6e6e;
+    font-style: italic;
+    display: block;
+}
+.council-card.collapsed .council-card-desc,
+.council-card.collapsed .council-role-list,
+.council-card.collapsed .add-role-category-btn {
+    display: none;
+}
+.council-role-list {
+    list-style: none;
+    padding: 0 8px;
+    margin: 0;
+}
+.council-role-list li {
+    padding: 8px 12px;
+    cursor: pointer;
+    border-radius: 4px;
+    transition: background 0.2s, color 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+.council-role-list li:hover {
+    background: rgba(196, 30, 58, 0.15);
+    color: var(--highlight-color);
+}
+.council-role-list li.active {
+    background: var(--highlight-color);
+    color: var(--button-text);
+}
+.council-role-list li .delete-role-btn {
+    opacity: 0;
+    transition: opacity 0.2s;
+}
+.council-role-list li:hover .delete-role-btn {
+    opacity: 1;
+}
+.council-empty {
+    color: #555;
+    font-style: italic;
+    cursor: default !important;
+    padding: 8px 12px;
+}
+.council-card .add-role-category-btn {
+    width: calc(100% - 16px);
+    margin: 4px 8px 8px;
+    font-size: 0.8rem;
+}
+.section-divider {
+    font-family: Georgia, 'Times New Roman', serif;
+    font-size: 0.9em;
+    color: var(--lms-ink-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 12px 0 4px;
+    margin: 0;
+    border-bottom: 1px solid var(--border-color);
+    cursor: default;
+    user-select: none;
+}
+.section-divider.warning {
+    color: #c89a3a;
+}
 
 /* Form & Input Elements */
 .config-section {

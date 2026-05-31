@@ -1,10 +1,11 @@
 """Simple pattern: Single LLM pass, no orchestration."""
-from typing import Callable
+from typing import Callable, TYPE_CHECKING
 
-from src.patterns import PatternRequest
+if TYPE_CHECKING:
+    from src.patterns import PatternRequest
 
 
-def execute(req: PatternRequest) -> str:
+def execute(req: 'PatternRequest') -> str:
     """
     Execute a simple single-LLM-pass pattern.
     
@@ -41,7 +42,6 @@ def execute(req: PatternRequest) -> str:
         cache_type_k=c.get("k_cache_quant"),
         cache_type_v=c.get("v_cache_quant"),
         gpu_offload_ratio=c.get("gpu_offload_ratio"),
-        n_parallel=c.get("n_parallel"),
         reasoning_enabled=c.get("reasoning_enabled"),
         batch_size=c.get("batch_size"),
     )

@@ -2,20 +2,20 @@
 proposal_id: ARCH-20260529-100228-096CEDAF
 phase: beta
 status: in_progress
-created: 2026-05-30 01:38:49
+created: 2026-05-31 06:14:43
 handoff_type: beta_testing
 related_proposal: "[[ARCH-20260529-100228-096CEDAF_PROPOSAL]]"
 kanban_card_id: "^[ARCH-20260529100228-096CEDAF]"
 source_note: ""
 next_phase: Alpha Polish
 tasks_completed: 0
-tasks_total: 20
+tasks_total: 21
 vault_kanban: "1. P - Seedlings/Dev-KanBan.md"
 ---
 
 # 🧪 Beta Testing Handoff — ARCH-20260529-100228-096CEDAF
 
-> **Generated**: 2026-05-30 01:38:49  
+> **Generated**: 2026-05-31 06:14:43  
 > **Proposal**: [[ARCH-20260529-100228-096CEDAF_PROPOSAL]]  
 > **Phase**: Beta Testing  
 > **Status**: 🔧 In Progress — take this document to VS Code
@@ -46,16 +46,20 @@ Backlinks to maintain:
 
 ```markdown
 ---
-# **Cognitive-OS Spec-Kit Integration: Engineering Plan**
-**Version**: 1.0
-**Date**: 2026-05-30
-**Author**: Systems Architect (Distilled by DeepSeek)
-**Status**: Approved (with safeguards)
-**Phase**: Backlog → Implementation
+title: "ARCH-20260529-100228-096CEDAF: Spec-Kit Integration Engineering Plan"
+author: Systems Architect (Beta Council)
+date: 2026-05-31
+version: "1.0"
+status: approved
 ---
 
-# **📜 Executive Summary**
-This engineering plan outlines the technical implementation of **spec-kit as a presentation layer** for the Cognitive-OS governance engine. The integration enables developers to interact with the system via slash commands (`/spe
+# **Spec-Kit Integration Engineering Plan**
+*Transforming Cognitive-OS Governance into a Developer-Friendly CLI Workflow*
+
+---
+
+## **📜 Executive Summary**
+This engineering plan outlines the integration of **GitHub's Spec-Kit** as a **presentation layer** for the Cognitive-OS governance pipeline. The goal is to
 
 ---
 
@@ -70,56 +74,53 @@ _No specific difficulties extracted — see full report below._
 > Tick each item off as you complete it in VS Code.
 > Update `tasks_completed` in the frontmatter as you go.
 
-### Section A — Phase 1 - Install & Integrate
+### Section A — CLI Installation & Integration
 
-- [ ] **[✏️ PLANNER] A1. Install spec-kit CLI**
-   - [ ] Run `uv tool install specify-cli --from git+https://github.com/github/spec-kit.git`
-   - **Acceptance:** Spec-kit CLI is installed and slash commands appear in VS Code.
+- [ ] **[✏️ PLANNER] A1. Install spec-kit CLI with version lock**
+   - [ ] uv tool install specify-cli --from git+https://github.com/github/spec-kit.git
+   - [ ] specify init cognitive-os --integration copilot
+   - **Acceptance:** Pinned spec-kit CLI with version lock and slash commands appear in VS Code
    - **Constraints:** CSTR-SPECKIT-V1
 
-- [ ] **[✏️ PLANNER] A2. Create `/speckit.constitution` mapping**
-   - [ ] Read `master_config.md` and `.clinerules/` for governing principles.
-   - [ ] Generate a `.specify/constitution.md` reflecting Dark Maestro governance.
-   - **Acceptance:** .specify/constitution.md is generated with appropriate governance details.
+- [ ] **[✏️ PLANNER] A2. Create /speckit.constitution mapping**
+   - [ ] Read master_config.md + .clinerules/ for governing principles
+   - [ ] Produce a .specify/constitution.md that reflects Dark Maestro governance
+   - **Acceptance:** A .specify/constitution.md is produced reflecting Dark Maestro governance
    - **Constraints:** CSTR-SPECKIT-V1
+   - **Files:** `.specify/templates/constitution.md`
 
 - [ ] **[✏️ PLANNER] A3. Map spec-kit commands to cognitive-os primitives**
-   - [ ] Implement command files for `/speckit.specify`, `/speckit.plan`, `/speckit.tasks`, and `/speckit.implement`.
-   - [ ] Ensure these commands call the corresponding cognitive-os functions.
-   - **Acceptance:** Spec-kit slash commands are functional, mapping to correct cognitive-os primitives.
-   - **Constraints:** CSTR-SPECKIT-V1, H3
+   - [ ] /speckit.specify → ProposalWriter.create_proposal(origin='spec-kit')
+   - [ ] /speckit.plan → Technical Meeting council (Phase 1)
+   - [ ] /speckit.tasks → HandoffPlanner integration
+   - [ ] /speckit.implement → Beta handoff → Cline pipeline
+   - [ ] /speckit.analyze → alpha_polish_check.py compatibility
+   - **Acceptance:** All spec-kit commands map correctly to cognitive-os primitives and flow through the governance pipeline
+   - **Constraints:** CSTR-SPECKIT-V1
    - **Files:** `.specify/commands/speckit.specify.md`, `.specify/commands/speckit.plan.md`, `.specify/commands/speckit.tasks.md`, `.specify/commands/speckit.implement.md`
 
 - [ ] **[✏️ PLANNER] A4. Add spec-kit origin to proposal schema**
-   - [ ] Modify `ValidatedProposal` model to include `origin: "spec-kit"`.
-   - [ ] Update the dashboard to display spec-kit proposals with a distinct icon/badge.
-   - **Acceptance:** Proposals originating from spec-kit are marked correctly, and appear on the dashboard.
-   - **Constraints:** CSTR-SPECKIT-V3, H1
+   - [ ] origin: 'spec-kit' added to ValidatedProposal model
+   - [ ] Dashboard shows spec-kit proposals with distinct icon/badge
+   - **Acceptance:** All proposals from spec-kit carry the origin flag and flow through the standard lifecycle
+   - **Constraints:** CSTR-SPECKIT-V3
    - **Files:** `src/models/proposal.py`
 
-### Section B — Phase 2 - Antigravity Preset
+### Section B — Antigravity Preset
 
-- [ ] **[✏️ PLANNER] B1. Build and publish `antigravity-preset`**
-   - [ ] Override spec-kit templates with Dark Maestro governance.
-   - [ ] Ship the preset as an extension to the spec-kit community registry.
-   - **Acceptance:** The `antigravity-preset` is published and can be installed via `specify preset add antigravity`.
-   - **Constraints:** CSTR-SPECKIT-V2
-
-- [ ] **[✏️ PLANNER] B2. Preset contents**
-   - [ ] Create templates for `spec-template.md`, `plan-template.md`, and `tasks-template.md`.
-   - [ ] Implement custom slash commands in the `.specify/commands/` directory.
-   - **Acceptance:** Preset includes all necessary governance overrides and custom commands.
-   - **Constraints:** CSTR-SPECKIT-V2
+- [ ] **[✏️ PLANNER] B1. Build and publish antigravity-preset**
+   - [ ] Overrides spec-kit's default templates with Dark Maestro governance
+   - [ ] Ships the council prompt chain as a preset extension
+   - **Acceptance:** Antigravity Preset is published to the community registry and can be installed via specify preset add antigravity
+   - **Constraints:** CSTR-SPECKIT-V1
    - **Files:** `.specify/presets/antigravity/templates/`, `.specify/presets/antigravity/commands/`
 
-### Section C — Phase 3 - Dashboard Integration
+### Section C — Dashboard Integration
 
 - [ ] **[✏️ PLANNER] C1. Spec-kit tab in dashboard**
-   - [ ] Design and implement the spec-kit tab on the dashboard.
-   - [ ] Show active specs, their phase, linked proposals, and `/speckit.analyze` results.
-   - **Acceptance:** The spec-kit tab is functional, providing a clear view of spec-kit activities on the dashboard.
-   - **Constraints:** CSTR-SPECKIT-V1, H2
-   - **Files:** `src/dashboard/views.py`
+   - [ ] Shows active specs, their phase, linked proposals
+   - [ ] Cross-references spec-kit task lists with Kanban cards
+   - **Acceptance:** A spec-kit tab is integrated into the dashboard showing all relevant information
 
 ---
 *Generated by HandoffPlanner v1.0. Dark Maestro Ready.*
@@ -133,208 +134,233 @@ _No specific difficulties extracted — see full report below._
 
 ```markdown
 ---
-# **Cognitive-OS Spec-Kit Integration: Engineering Plan**
-**Version**: 1.0
-**Date**: 2026-05-30
-**Author**: Systems Architect (Distilled by DeepSeek)
-**Status**: Approved (with safeguards)
-**Phase**: Backlog → Implementation
+title: "ARCH-20260529-100228-096CEDAF: Spec-Kit Integration Engineering Plan"
+author: Systems Architect (Beta Council)
+date: 2026-05-31
+version: "1.0"
+status: approved
 ---
 
-# **📜 Executive Summary**
-This engineering plan outlines the technical implementation of **spec-kit as a presentation layer** for the Cognitive-OS governance engine. The integration enables developers to interact with the system via slash commands (`/speckit.specify`, `/speckit.plan`, etc.) while preserving the Cognitive-OS’s core governance pipeline. The plan includes:
-- **CLI Integration**: Installing spec-kit and mapping commands to Cognitive-OS primitives.
-- **Antigravity Preset**: Customizing spec-kit templates with Dark Maestro governance aesthetics.
-- **Dashboard Integration**: Visualizing spec-kit proposals alongside existing workflows.
-- **Safeguards**: Preventing governance bypass, ensuring gate compatibility, and mitigating upgrade risks.
+# **Spec-Kit Integration Engineering Plan**
+*Transforming Cognitive-OS Governance into a Developer-Friendly CLI Workflow*
 
 ---
 
-# **🔧 Technical Overview**
-### **Core Architecture**
-The system follows a **strictly decoupled** design:
-- **spec-kit** = User-facing CLI/markdown prompts (read-only).
-- **Cognitive-OS** = Backend engine (proposals, councils, handoffs, execution).
-- **Bridge Module** (`src.speckit_bridge.py`) = Single entry point for spec-kit commands.
+## **📜 Executive Summary**
+This engineering plan outlines the integration of **GitHub's Spec-Kit** as a **presentation layer** for the Cognitive-OS governance pipeline. The goal is to replace manual proposal filing (Obsidian + Kanban drag-and-drop) with **slash commands** (`/speckit.specify`, `/speckit.plan`, etc.) that directly invoke Cognitive-OS primitives while preserving all governance constraints.
 
-### **Key Components**
-| Component               | Purpose                                                                 | Files/Modules                          |
-|-------------------------|-------------------------------------------------------------------------|----------------------------------------|
-| **spec-kit CLI**        | User interface for slash commands.                                       | `specify init cognitive-os`            |
-| **Command Mapping**     | Maps spec-kit commands to Cognitive-OS primitives.                       | `src.speckit_bridge.py`                |
-| **Antigravity Preset**  | Custom templates and prompts for Dark Maestro governance.               | `.specify/presets/antigravity/`        |
-| **Dashboard Tab**       | Visualizes spec-kit proposals in the Cognitive-OS dashboard.            | `dashboard/spec-kit-tab.js`           |
-| **Gate Wrapper**        | Ensures `/speckit.analyze` integrates cleanly with `alpha_polish_check.py`. | `src.gate_wrapper.py`                  |
+**Key Outcomes:**
+- Developers can now file proposals via `/speckit.specify` → automatically routed to council, with handoffs generated via `/speckit.tasks` and `/speckit.implement`.
+- An **Antigravity Preset** provides Dark Maestro governance templates and council prompt chains.
+- Dashboard integration shows spec-kit-originated proposals alongside traditional ARCH/DEV/NLST workflows.
+- **Security and determinism** are enforced via a hardened `speckit_bridge.py` module.
 
 ---
 
-# **📋 Implementation Phases**
-## **Phase 1: CLI & Command Mapping**
-### **Deliverables**
+## **🔧 Core Components**
+| Component               | Purpose                                                                 | Files/Modules                                                                 |
+|-------------------------|-------------------------------------------------------------------------|-------------------------------------------------------------------------------|
+| **spec-kit CLI**        | Standardized CLI for Spec-Driven Development.                           | `uv tool install specify-cli`                                                 |
+| **speckit_bridge.py**   | Secure adapter module mapping slash commands to Cognitive-OS primitives. | New Python module (100+ LOC)                                                 |
+| **Antigravity Preset**  | Dark Maestro governance templates for spec-kit.                         | `specify preset add antigravity`                                              |
+| **Dashboard Integration**| Sync spec-kit proposals with internal Kanban/Kanban cards.              | Custom tab in dashboard (200+ LOC)                                          |
+
+---
+
+## **📋 Phase Breakdown**
+### **Phase 1: CLI & Bridge Integration (Critical Path)**
 1. **Install spec-kit CLI**
-   - Install via `uv tool install specify-cli --from git+https://github.com/github/spec-kit.git`.
-   - Initialize Cognitive-OS integration: `specify init cognitive-os --integration copilot`.
+   - Pin version to avoid drift.
+   - Verify slash commands appear in VS Code.
 
-2. **Create `src.speckit_bridge.py`**
-   - **Functionality**:
-     - Receives markdown prompts from spec-kit slash commands.
-     - Validates input via `ProposalValidator`.
-     - Routes to Cognitive-OS primitives:
-       - `/speckit.specify` → `ProposalWriter.create_proposal(origin="spec-kit")`.
-       - `/speckit.plan` → `CouncilRunner.run(phase="TechnicalMeeting", scope="architecture")`.
-       - `/speckit.tasks` → `HandoffPlanner.generate_tasks(proposal_id)`.
-       - `/speckit.implement` → `HandoffExecutor.generate_beta_handoff(proposal_id)`.
-   - **Security**:
-     - Runs in a constrained environment with explicit allowlists for file writes/execs.
-     - Logs all requests to `src.approval_logger` with `origin: spec-kit` metadata.
+2. **Define `speckit_bridge.py` Interface**
+   - **Input Schema**: Structured markdown prompts (e.g., YAML frontmatter for metadata).
+   - **Execution Model**: Deterministic CLI/MCP contract (no LLM ambiguity).
+   - **Security Hardening**: Explicit allowlists for filesystem/network access.
 
-3. **Map spec-kit commands to Cognitive-OS**
-   | spec-kit command | Cognitive-OS Primitive                          | Notes                                  |
-   |-------------------|-------------------------------------------------|----------------------------------------|
-   | `/speckit.specify` | `ProposalWriter.create_proposal`               | Adds `origin: spec-kit` to proposal.   |
-   | `/speckit.plan`    | `CouncilRunner.run(phase="TechnicalMeeting")`   | Fast-tracked to Phase 1.              |
-   | `/speckit.tasks`   | `HandoffPlanner.generate_tasks`                | Uses HandoffPlanner (`5DFB393F`).      |
-   | `/speckit.implement`| `HandoffExecutor.generate_beta_handoff`       | Requires `APPROVED` status.           |
-   | `/speckit.analyze` | `GateWrapper.run_analyze(proposal_id)`         | Calls `alpha_polish_check.py`.        |
+3. **Map Commands to Cognitive-OS**
+   | spec-kit command | Cognitive-OS Primitive                     | Notes                                                                 |
+   |-------------------|--------------------------------------------|-----------------------------------------------------------------------|
+   | `/speckit.specify` | `ProposalWriter.create_proposal()`         | `origin: "spec-kit"` added to schema.                                  |
+   | `/speckit.plan`    | Technical Meeting council (Phase 1)        | `--scope architecture` flag.                                           |
+   | `/speckit.tasks`   | HandoffPlanner (`5DFB393F`)               | Council-aware task generation.                                        |
+   | `/speckit.implement`| Beta handoff → Cline pipeline             | Preserves human approval gates.                                         |
+   | `/speckit.analyze` | `alpha_polish_check.py`                   | Gate verification compatible with existing system.                      |
+   | `/speckit.clarify` | Fast-track boardroom review              | Single-round, low-friction review.                                     |
+
+4. **State Synchronization**
+   - Embed **internal proposal/Kanban IDs** in `.specify/` artifacts via:
+     - Standardized headers (e.g., `--- proposal_id: ARCH-12345 ---`).
+     - Webhook callbacks for bidirectional traceability.
 
 ---
 
-## **Phase 2: Antigravity Preset**
-### **Deliverables**
-1. **Customize spec-kit templates**
-   - Override default templates with Dark Maestro governance aesthetics:
-     - `.specify/presets/antigravity/templates/spec-template.md` → Gothic prompt structure.
-     - `.specify/presets/antigravity/templates/plan-template.md` → Council-aware planning.
-     - `.specify/presets/antigravity/templates/tasks-template.md` → HandoffPlanner format.
+### **Phase 2: Antigravity Preset**
+1. **Build Preset Package**
+   - Override spec-kit templates with Dark Maestro governance:
+     - `spec-template.md` → Dark aesthetic prompts.
+     - `plan-template.md` → Council-aware planning.
+     - `tasks-template.md` → HandoffPlanner format.
+   - Include custom slash commands (`/council`, `/devlog`).
 
-2. **Add custom slash commands**
-   - `/speckit.symbolize` → Generates occult-inspired design motifs (e.g., glyphs for project scope).
-   - `/speckit.council` → Directs to the Technical Meeting council with Dark Maestro prompts.
-
-3. **Publish to spec-kit registry**
-   - Package as `antigravity-preset` with:
-     - Installation command: `specify preset add antigravity`.
-     - Includes `Occult Prompt Weaving` utility for dynamic prompt injection.
+2. **Publish to Community Registry**
+   - `specify preset add antigravity` installable via:
+     ```bash
+     specify preset add https://github.com/your-repo/antigravity-preset.git
+     ```
 
 ---
 
-## **Phase 3: Dashboard Integration**
-### **Deliverables**
-1. **spec-kit tab in dashboard**
-   - Visualizes:
-     - Active spec-kit proposals with phase status.
-     - Cross-references tasks with Kanban cards.
-     - Displays `/speckit.analyze` gate results.
-   - **UI Design**:
-     - Gothic architecture blueprints for spec-kit proposals.
-     - Illuminated manuscript-style annotations for council verdicts.
+### **Phase 3: Dashboard Integration**
+1. **Spec-Kit Tab**
+   - Display:
+     - Active specs with phase status.
+     - Cross-referenced Kanban cards.
+     - `/speckit.analyze` gate results.
 
-2. **Proposal provenance**
-   - All spec-kit proposals show `origin: spec-kit` in the dashboard.
-   - Badge/icon for spec-kit proposals to distinguish them.
+2. **Provenance Preservation**
+   - All spec-kit proposals carry `origin: "spec-kit"` in the database.
+   - Dashboard icons/badges distinguish spec-kit workflows.
 
 ---
 
-# **⚠️ Safeguards & Constraints**
-### **1. Governance Bypass Prevention**
-- **API Contracts**: All requests from `src.speckit_bridge.py` must include `origin: spec-kit` and route through `src.council_runner`.
-- **Audit Logging**: Logs all bridge requests to `src.approval_logger` with timestamps and approval status.
-- **Veto Points**:
-  - **VETO**: Any implementation that allows `/speckit.implement` to bypass council approval.
-  - **VETO**: Direct modification of `alpha_polish_check.py` internals.
-
-### **2. Gate Compatibility**
-- **JSON-RPC Wrapper**: `/speckit.analyze` calls `src.gate_wrapper.py`, which ensures compatibility with `alpha_polish_check.py`.
-- **No Breaking Changes**: Preset and CLI are versioned independently to handle spec-kit upgrades.
-
-### **3. Preset Maintenance**
-- **Low Burden**: Preset is mostly template overrides; no code changes required unless spec-kit evolves.
-- **Dynamic Prompts**: `Occult Prompt Weaving` system injects Sovereign Compass directives into prompts.
+## **🛡️ Binding Constraints (CSTR-SPECKIT)**
+| Constraint ID | Description                                                                 | Enforcement Mechanism                          |
+|---------------|-----------------------------------------------------------------------------|-----------------------------------------------|
+| CSTR-SPECKIT-V1 | spec-kit is a UX layer, not the engine.                                    | No direct API changes; CLI only calls primitives. |
+| CSTR-SPECKIT-V2 | No autopost tie-in; `/speckit.implement` respects human gates.              | DevLog Agent remains separate.               |
+| CSTR-SPECKIT-V3 | Proposals originate from spec-kit but flow through standard lifecycle.      | `origin: "spec-kit"` metadata preserved.       |
+| CSTR-SPECKIT-V4 | `/speckit.analyze` uses `alpha_polish_check.py`; no competing gates.       | Compatibility check script added.             |
 
 ---
 
-# **📝 Risk Mitigation**
+## **🔍 Technical Risks & Mitigations**
 | Risk                          | Mitigation Strategy                                                                 |
-|-------------------------------|------------------------------------------------------------------------------------|
-| Governance bypass             | Explicit API contracts + audit logging.                                            |
-| Gate incompatibility          | JSON-RPC wrapper for `alpha_polish_check.py`.                                     |
-| Preset upgrade conflicts      | Versioned preset and CLI.                                                          |
-| Occult symbolism drift        | Centralized `Occult Prompt Weaving` system.                                         |
+|-------------------------------|-----------------------------------------------------------------------------------|
+| **Security Vulnerabilities**  | `speckit_bridge.py` runs in sandboxed environment with strict allowlists.          |
+| **Data Drift**                | Metadata linking (headers/webhooks) ensures traceability.                          |
+| **Deterministic Execution**   | MCP/CLI contract replaces LLM ambiguity.                                         |
+| **Provenance Loss**           | `origin: "spec-kit"` flag embedded in all artifacts.                              |
 
 ---
 
-# **📅 Timeline & Dependencies**
-| Phase       | Task                                      | Owner               | Deadline          |
-|-------------|-------------------------------------------|---------------------|-------------------|
-| **1**       | Install spec-kit CLI                       | Systems Architect   | 2026-05-31        |
-| **2**       | Develop `src.speckit_bridge.py`           | Systems Architect   | 2026-06-05        |
-| **3**       | Build Antigravity Preset                   | Creative Expansionist | 2026-06-10       |
-| **4**       | Dashboard spec-kit tab                     | Tech Board          | 2026-06-15        |
-| **5**       | Alpha Testing                               | Editor Agent (Cline) | 2026-06-20        |
-| **6**       | Beta Polish                                | Beta Council        | 2026-06-25        |
-
-**Dependencies**:
-- Phase 5 (production wiring) complete.
-- DevLog Agent operational (`78D36EDB`).
-- HandoffPlanner (`5DFB393F`) wired to `/speckit.tasks`.
+## **📝 Implementation Roadmap**
+| Task                          | Owner               | Deadline       | Status       |
+|-------------------------------|---------------------|----------------|--------------|
+| Draft `speckit_bridge.py` spec | Systems Architect   | 2026-05-31     | Approved     |
+| Implement bridge module        | Editor Agent (Cline)| 2026-06-05     | In Progress  |
+| Build Antigravity Preset       | Creative Expansionist| 2026-06-10     | In Progress  |
+| Dashboard spec-kit tab         | Tech Board          | 2026-06-15     | Pending      |
+| Beta Testing                  | Developer Community | 2026-06-20     | Planned      |
 
 ---
 
-# **🎨 Aesthetic & Brand Integration**
-### **Occult Prompt Weaving**
-- **Dynamic Prompts**: Injects Dark Maestro’s Sovereign Compass directives into spec-kit prompts.
-  Example:
-  ```markdown
-  # /speckit.specify "Build a photo album app"
-  **Prompt**: "This spec must embody the Sovereign Compass’s principle of 'Gothic Precision.' Use occult symbols to represent the app’s core functions (e.g., a 'Photonic Glyph' for image storage)."
-  ```
+## **🎨 Creative Expansionist’s Vision (Optional Enhancements)**
+While core requirements are met, the following **aesthetic/ritualistic** integrations could be explored:
+1. **Dynamic Council Prompt Chaining**
+   - Use ComfyUI’s canvas reader to analyze developer sentiment from slash commands and adjust council prompt weights (e.g., emphasize technical rigor vs. aesthetic innovation).
+2. **Dark Realism Telemetry**
+   - Embed contrast/symbolism principles into proposal validation (e.g., proposals scoring low on "visual impact" route to a "design polish" council round).
+3. **Ritualistic Handoffs**
+   - Transform `/speckit.implement` into a multi-step artistic ritual where Cline’s handoff includes mandatory dark-themed imagery generation before code execution.
 
-### **Governance Mosaic Dashboard**
-- Visualizes spec-kit proposals as **gothic architecture blueprints**:
-  - Proposal phases = "Foundational Stone," "Architectural Frame," "Illuminated Manuscript."
-  - Council verdicts = "Sealed with Blood" (approved) or "Cursed by the Council" (rejected).
+**Note:** These enhancements are **non-critical** to core functionality but could enhance user experience.
 
 ---
 
-# **🔧 Technical Files**
-| File                          | Purpose                                                                 |
-|-------------------------------|-------------------------------------------------------------------------|
-| `src/speckit_bridge.py`       | Maps spec-kit commands to Cognitive-OS primitives.                       |
-| `src/gate_wrapper.py`         | Ensures `/speckit.analyze` integrates with `alpha_polish_check.py`.    |
-| `src/approval_logger.py`      | Logs all spec-kit requests with `origin: spec-kit`.                     |
-| `.specify/presets/antigravity/`| Custom templates and prompts for Dark Maestro governance.               |
-| `dashboard/spec-kit-tab.js`   | Visualizes spec-kit proposals in the dashboard.                         |
+## **📋 Final Verdict & Approval**
+**Decision:** **APPROVED**
+**Rationale:**
+The proposal correctly positions spec-kit as a **deterministic, secure presentation layer** over the existing governance engine. Key risks (security, data drift, governance integrity) are addressed via:
+- A hardened `speckit_bridge.py` with strict allowlists.
+- Metadata linking to preserve provenance.
+- Deterministic execution contracts (MCP/CLI).
+
+**Next Steps:**
+1. Draft and approve `speckit_bridge.py` interface specification.
+2. Implement Phase 1 wiring (CLI + bridge).
+3. Proceed to Phase 2 (Preset) and Phase 3 (Dashboard).
 
 ---
-
-# **📋 Appendix: Deliberation History**
-### **Key Discussions**
-1. **Systems Architect (2026-05-30)**
-   - Proposed a **strictly decoupled** design with a bridge module.
-   - Highlighted the need for **explicit API contracts** to prevent governance bypass.
-
-2. **Creative Expansionist (2026-05-30)**
-   - Proposed **Occult Prompt Weaving** and **Governance Mosaic** dashboard.
-   - Emphasized aligning spec-kit with Dark Maestro’s aesthetic and governance ethos.
-
-3. **Technical Critic (2026-05-30)**
-   - **Vetoed** due to:
-     - Lack of **specific safeguards** against governance bypass.
-     - **Undefined compatibility** for `/speckit.analyze` and `alpha_polish_check.py`.
-   - **Brand Guard Rejected** with **high-risk veto points**.
-
-4. **Final Approval (2026-05-30)**
-   - **Veto Points Implemented**:
-     - Explicit API contracts + audit logging.
-     - JSON-RPC wrapper for gate compatibility.
-   - **Brand Guard Approved** with **aesthetic enhancements** integrated.
-
----
-**End of Report**
+```json
+{
+  "engineering_plan": {
+    "components": {
+      "cli": {
+        "installation": "Pinned spec-kit CLI with version lock",
+        "commands": {
+          "specify": "ProposalWriter.create_proposal(origin='spec-kit')",
+          "plan": "Technical Meeting council (Phase 1)",
+          "tasks": "HandoffPlanner integration",
+          "implement": "Beta handoff → Cline pipeline",
+          "analyze": "alpha_polish_check.py compatibility"
+        }
+      },
+      "bridge": {
+        "spec": "Deterministic CLI/MCP contract with allowlists",
+        "security": "Sandboxed execution, no arbitrary shell access",
+        "metadata": "Embedded proposal/Kanban IDs in artifacts"
+      },
+      "preset": {
+        "templates": ["Dark Maestro governance templates"],
+        "installation": "specify preset add antigravity"
+      },
+      "dashboard": {
+        "integration": "Spec-kit tab with cross-referenced Kanban cards",
+        "provenance": "origin: 'spec-kit' flag in database"
+      }
+    },
+    "constraints": [
+      {
+        "id": "CSTR-SPECKIT-V1",
+        "description": "spec-kit is a UX layer, not the engine",
+        "enforcement": "No API changes; CLI only calls primitives"
+      },
+      {
+        "id": "CSTR-SPECKIT-V3",
+        "description": "Provenance preserved via origin metadata",
+        "enforcement": "Embedded flag in all artifacts"
+      }
+    ],
+    "risks": [
+      {
+        "type": "security",
+        "level": "high",
+        "mitigation": "Sandboxed bridge with strict allowlists"
+      },
+      {
+        "type": "data_drift",
+        "level": "medium",
+        "mitigation": "Metadata linking (headers/webhooks)"
+      }
+    ],
+    "roadmap": [
+      {
+        "task": "Draft bridge spec",
+        "owner": "Systems Architect",
+        "status": "approved"
+      },
+      {
+        "task": "Implement bridge",
+        "owner": "Editor Agent (Cline)",
+        "status": "in_progress"
+      }
+    ]
+  },
+  "aesthetic_considerations": [
+    {
+      "feature": "Dynamic prompt chaining",
+      "description": "Analyze developer sentiment via ComfyUI",
+      "status": "optional enhancement"
+    },
+    {
+      "feature": "Dark realism telemetry",
+      "description": "Embed contrast/symbolism into validation",
+      "status": "optional enhancement"
+    }
+  ]
+}
 ```
-
----
-This markdown report distills the proposal into a structured, actionable engineering plan while preserving the aesthetic, governance, and technical safeguards discussed during deliberation.
 
 </details>
 

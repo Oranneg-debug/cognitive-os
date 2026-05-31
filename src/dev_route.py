@@ -19,6 +19,7 @@ This module acts as a façade delegating to specialized modules:
 
 import os
 import uuid
+import asyncio
 from datetime import datetime
 from typing import Optional
 
@@ -299,11 +300,15 @@ class DevRouteManager:
             target_phase=WorkflowPhase.FINALIZED,
             target_substatus="released",
             approver="system",
-            reason="Finalized via dev route"
+            reason="Finalized via dev route",
+            version_hash=""  # Final audit bypasses optimistic lock
         )
         
         try:
-            result = engine.transition(req)
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            result = loop.run_until_complete(engine.transition(req))
+            loop.close()
             if not result.success:
                 return {"error": f"Failed to finalize proposal: {result.error}"}
         except Exception as e:

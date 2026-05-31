@@ -1,5 +1,9 @@
 """Oracle Council pattern: Strategic oversight with MAXIMUM compass."""
-from src.patterns import PatternRequest
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from src.patterns import PatternRequest
+
 from src.council_runner import run_council
 
 
@@ -13,7 +17,7 @@ ROLES = [
 SYNTHESIS_ROLE = "board_chairman"
 
 
-def execute(req: PatternRequest) -> str:
+def execute(req: 'PatternRequest') -> str:
     """
     Execute an Oracle Council pattern with MAXIMUM compass weight.
     

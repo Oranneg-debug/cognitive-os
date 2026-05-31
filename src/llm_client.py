@@ -90,7 +90,8 @@ class LLMClient:
         cache_type_k: Optional[str] = None,
         cache_type_v: Optional[str] = None,
         gpu_offload_ratio: Optional[float] = None,
-        n_parallel: Optional[int] = None,
+        batch_size: Optional[int] = None,
+        reasoning_enabled: Optional[bool] = None,
         **_extra_load_opts,
     ) -> str:
         """
@@ -135,7 +136,11 @@ class LLMClient:
             if context_window:
                 load_cfg["context_length"] = context_window
             if flash_attention is not None:
-                load_cfg["flash_attention"] = bool(flash_attention)
+                # Accept 'true'/'false' strings (dashboard select) and booleans
+                if isinstance(flash_attention, str):
+                    load_cfg["flash_attention"] = flash_attention.lower() == 'true'
+                else:
+                    load_cfg["flash_attention"] = bool(flash_attention)
             if cache_type_k is not None:
                 load_cfg["llama_k_cache_quantization_type"] = cache_type_k
             if cache_type_v is not None:
@@ -148,9 +153,9 @@ class LLMClient:
                 load_cfg["gpu"] = {"ratio": gpu_offload_ratio}
             elif gpu_layers == -1:
                 load_cfg["gpu"] = {"ratio": "max"}
-            # Parallelism — triggers the loader's CLI back-channel.
-            if n_parallel is not None:
-                load_cfg["n_parallel"] = int(n_parallel)
+            # Prompt eval batch size — maps to llama.cpp eval_batch_size.
+            if batch_size is not None:
+                load_cfg["batch_size"] = int(batch_size)
 
             result = loader.ensure_loaded(
                 model,
@@ -164,8 +169,6 @@ class LLMClient:
                     f" | FA={flash_attention} "
                     f"K={cache_type_k or 'f16'} V={cache_type_v or 'f16'}"
                 )
-            if n_parallel is not None:
-                kv_note += f" | n_par={n_parallel}"
             print(
                 f"[LOADED] {result.action}: {result.identifier} "
                 f"(Context: {context_window}, "
@@ -193,17 +196,22 @@ class LLMClient:
             print(f"    - repeat_penalty: {repeat_penalty}")
             print("-" * 60)
 
+            # Build extra_body dynamically so we don't send None values.
+            extra: dict = {
+                "top_k": top_k,
+                "repeat_penalty": repeat_penalty,
+                "min_p": min_p,
+            }
+            if reasoning_enabled is not None:
+                extra["reasoning_enabled"] = bool(reasoning_enabled)
+
             response = self.client.chat.completions.create(
                 model=model,
                 messages=messages,
                 temperature=temperature,
                 top_p=top_p,
                 max_tokens=max_tokens,
-                extra_body={
-                    "top_k": top_k,
-                    "repeat_penalty": repeat_penalty,
-                    "min_p": min_p
-                }
+                extra_body=extra
             )
             return response.choices[0].message.content
         except Exception as e:

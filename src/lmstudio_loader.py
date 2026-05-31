@@ -5,25 +5,16 @@ Part of DEV-20260521-001000-B5D5C0DE: replaces the silent-no-op
 `POST /api/v1/models/load` in legacy `llm_client.py` with calls against
 the official `lmstudio-python` SDK (verified 1.5.0, see requirements.txt).
 
-Two-path load strategy
-======================
-The SDK's ``LlmLoadModelConfig`` (verified empirically on 2026-05-21)
-**has no slot for max-parallel-predictions / n_parallel / n_seq_max**.
-Probed paths A/B (extra dict keys) and D (private `_kv_config`) all
-silently drop the value. Path C (`lms.llm()` factory) cannot force a
-fresh load.
+Single-path SDK load
+====================
+As of 2026-05-30, all loads use the typed SDK path exclusively.
+The CLI back-channel (``lms load --parallel``) was removed because
+it silently dropped flash_attention, KV cache quantization, and
+eval_batch_size — all knobs the SDK passes correctly.
 
-The **only working back-channel** is the `lms` CLI's ``--parallel``
-flag, verified to produce ``n_parallel=1`` in the LM Studio runtime
-debug log. So:
-
-  - When ``n_parallel`` is set in the load config, the loader
-    delegates to ``lms load`` subprocess (slow path, ~15-20s).
-  - When ``n_parallel`` is not set, the loader uses the SDK directly
-    (fast path, ~2-5s) — gets every other knob (context, FA, KV quant,
-    GPU offload) typed and validated.
-
-Both paths return the same ``LoadResult`` shape; callers don't care.
+n_parallel is not a field on LlmLoadModelConfig; LM Studio uses its
+per-model GUI prefs for parallelism. KV cache quantization correctness
+takes priority over parallelism control.
 
 Design contract (per Boardroom Chairman verdict 2026-05-20):
 
@@ -68,8 +59,6 @@ from __future__ import annotations
 
 import argparse
 import logging
-import shutil
-import subprocess
 import sys
 import threading
 import time
@@ -213,6 +202,9 @@ _LOAD_CONFIG_ALIASES: dict[str, str] = {
     "cache_type_k": "llama_k_cache_quantization_type",
     "cacheTypeV": "llama_v_cache_quantization_type",
     "cache_type_v": "llama_v_cache_quantization_type",
+    # master_config.md uses "batch_size" for prompt eval batch size;
+    # the SDK's canonical name is "eval_batch_size".
+    "batch_size": "eval_batch_size",
     # GPU offload — see _build_gpu_setting below for the nested form.
     # We accept both a top-level float (legacy) and a {ratio: …} dict.
 }
@@ -277,16 +269,14 @@ def normalize_config(raw: Mapping[str, Any] | None) -> dict[str, Any]:
         if canonical in ("gpu_offload_ratio", "gpuOffloadRatio"):
             normalised["gpu"] = _build_gpu_setting(value)
             continue
-        # Quietly tolerate `n_parallel` / `maxParallelPredictions` / etc.
-        # — the SDK's LlmLoadModelConfig doesn't have a slot for this, but
-        # we don't want to reject it because callers (and master_config.md)
-        # legitimately set it. Stash it for the loader to handle via a
-        # secondary path or to surface as a warning.
+        # n_parallel / maxParallelPredictions — the SDK's LlmLoadModelConfig
+        # doesn't have a slot for this. Stash it for CLI override after SDK load.
         if canonical in (
             "n_parallel", "nParallel", "maxParallelPredictions",
             "numParallelSessions", "parallel",
         ):
-            leftover["max_parallel_predictions"] = int(value)
+            normalised["__n_parallel__"] = int(value)
+            log.debug("[loader] stashing n_parallel=%s for CLI override", value)
             continue
         if canonical in _SDK_LOAD_FIELDS:
             normalised[canonical] = value
@@ -298,9 +288,10 @@ def normalize_config(raw: Mapping[str, Any] | None) -> dict[str, Any]:
             f"known aliases: {sorted(_LOAD_CONFIG_ALIASES)}"
         )
 
+    # __loader_extras__ is no longer populated (CLI path removed 2026-05-30).
+    # Keep the container for backwards compat with existing callers that
+    # expect it in the return value.
     if leftover:
-        # Attach as a private side-band; the loader pops it before
-        # constructing the SDK config object.
         normalised["__loader_extras__"] = leftover
     return normalised
 
@@ -369,9 +360,15 @@ def _diff_effective_vs_requested(
             continue
         live_val = _extract_live_value(live, key)
         if live_val is None:
-            # The SDK didn't report this field. Be conservative: only flag
-            # drift for the high-impact knobs (context_length / FA).
-            if key in {"context_length", "flash_attention"}:
+            # The SDK didn't report this field. Flag drift for all
+            # high-impact knobs — silently ignoring KV cache quant
+            # was Bug #1 (ARCH-20260529-150000-C7EBA3E9 trace).
+            if key in {
+                "context_length", "flash_attention",
+                "llama_k_cache_quantization_type",
+                "llama_v_cache_quantization_type",
+                "eval_batch_size",
+            }:
                 diff[key] = {"live": "<unreported>", "requested": want}
             continue
         # Normalise types for comparison (the SDK sometimes wraps numbers).
@@ -394,18 +391,8 @@ def _diff_effective_vs_requested(
             if str(live_val) != str(want):
                 diff[key] = {"live": live_val, "requested": want}
 
-    # 2. The CLI-only `n_parallel` lives in extras. If it's set, the live
-    # instance MUST have been loaded via the CLI path — there's no way to
-    # know from the SDK info struct, so a parallelism request always forces
-    # a reload (safe default).
-    if "max_parallel_predictions" in extras or "n_parallel" in extras:
-        want_parallel = extras.get("max_parallel_predictions") or extras.get("n_parallel")
-        live_parallel = _extract_live_value(live, "max_parallel_predictions")
-        if live_parallel is None or int(live_parallel) != int(want_parallel):
-            diff["max_parallel_predictions"] = {
-                "live": live_parallel if live_parallel is not None else "<unreported>",
-                "requested": want_parallel,
-            }
+    # 2. n_parallel is no longer used (CLI path removed 2026-05-30).
+    # LM Studio handles parallelism via its per-model GUI prefs.
 
     return diff
 
@@ -613,17 +600,14 @@ class LMStudioLoader:
                 f"Available: {sorted(self._downloaded_cache)[:10]}…"
             )
 
-        # ----- Dispatch: CLI back-channel if parallelism set, SDK otherwise.
-        parallel = extras.get("max_parallel_predictions")
-        if parallel is not None:
-            return self._load_via_cli(
-                model_key=model_key,
-                identifier=identifier,
-                norm=norm,
-                parallel=int(parallel),
-                ttl=ttl,
-                snap=snap,
-            )
+        # Always use the typed SDK path — KV cache quantization is more
+        # important than n_parallel, and the CLI path silently drops
+        # flash_attention, llama_k_cache_quantization_type,
+        # llama_v_cache_quantization_type, eval_batch_size, etc.
+        # n_parallel is not a field on LlmLoadModelConfig and is quietly
+        # ignored by the SDK (LM Studio uses its per-model GUI prefs for it).
+        if extras:
+            log.info("[loader] dropping CLI-only extras (all loads now use SDK): %s", extras)
         return self._load_via_sdk(
             model_key=model_key,
             identifier=identifier,
@@ -647,7 +631,10 @@ class LMStudioLoader:
         on_progress: Callable[[float], Any] | None,
         snap: SnapshotResult | None,
     ) -> LoadResult:
-        """Fast path: typed SDK call, every knob except parallelism."""
+        """Typed SDK call — all load knobs including KV cache quantization."""
+        # Extract n_parallel for CLI override (not in SDK config)
+        n_parallel_override = norm.pop("__n_parallel__", None)
+        
         sdk_config: LlmLoadModelConfig | None
         if norm:
             try:
@@ -682,6 +669,18 @@ class LMStudioLoader:
             ) from exc
         elapsed = time.monotonic() - t0
 
+        # CLI override for n_parallel (SDK doesn't support it)
+        if n_parallel_override is not None:
+            try:
+                import subprocess
+                cmd = ["lms", "load", "--parallel", str(n_parallel_override), identifier]
+                log.info(f"[loader] CLI override: {' '.join(cmd)}")
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+                if result.returncode != 0:
+                    log.warning(f"[loader] CLI n_parallel override failed: {result.stderr}")
+            except Exception as exc:
+                log.warning(f"[loader] CLI n_parallel override exception: {exc}")
+
         actual_identifier = (
             getattr(handle, "identifier", None)
             or getattr(handle, "model_identifier", None)
@@ -692,132 +691,6 @@ class LMStudioLoader:
             identifier=str(actual_identifier),
             action="loaded",
             config_applied=norm,
-            duration_seconds=elapsed,
-            snapshot=snap,
-        )
-
-    def _load_via_cli(
-        self,
-        *,
-        model_key: str,
-        identifier: str,
-        norm: dict[str, Any],
-        parallel: int,
-        ttl: int | None,
-        snap: SnapshotResult | None,
-    ) -> LoadResult:
-        """Slow path: shell out to ``lms load`` for parallelism control.
-
-        The CLI is the only verified back-channel (probed 2026-05-21)
-        for setting ``n_parallel`` on the underlying llama.cpp runtime.
-        Verified to produce ``n_parallel=1`` and ``n_seq_max=1`` in the
-        LM Studio debug log, with pipeline parallelism preserved.
-
-        Side-effects:
-            - Spawns a child process: ``lms load <args> <model_key>``.
-            - Times out after ``self._load_timeout`` seconds.
-            - Does NOT support on_progress (CLI doesn't stream progress
-              to our stdout — that's a future enhancement).
-        """
-        lms_bin = shutil.which("lms")
-        if not lms_bin:
-            raise LoaderError(
-                "max_parallel_predictions was requested but the `lms` CLI "
-                "is not on PATH. Install LM Studio's CLI bridge or unset "
-                "n_parallel in master_config.md to fall back to the SDK."
-            )
-
-        args: list[str] = [
-            lms_bin, "load",
-            "--identifier", identifier,
-            "--parallel", str(parallel),
-            "--yes",  # don't prompt for unloads
-        ]
-        # GPU offload — translate the SDK `gpu` block back to a CLI flag.
-        gpu_block = norm.get("gpu")
-        if isinstance(gpu_block, dict):
-            ratio = gpu_block.get("ratio")
-            if ratio is not None:
-                args.extend(["--gpu", str(ratio)])
-        # Context length — first-class CLI flag.
-        ctx = norm.get("context_length")
-        if ctx is not None:
-            args.extend(["--context-length", str(int(ctx))])
-        # TTL — pass through if explicit.
-        if ttl is not None:
-            args.extend(["--ttl", str(int(ttl))])
-        # Final positional arg: model key.
-        args.append(model_key)
-
-        # NB: any normalised field not representable as a CLI flag
-        # (flash_attention, KV quant, eval_batch_size, ...) is silently
-        # *not applied by the CLI* — but the model's persisted per-model
-        # GUI config still governs those, and the snapshot we took before
-        # this call ensures user-tuned defaults are recoverable. We
-        # surface a warning so callers know which knobs the CLI dropped.
-        unmapped = [
-            k for k in norm.keys()
-            if k not in ("gpu", "context_length")
-        ]
-        if unmapped:
-            log.warning(
-                "[loader] CLI path can't set these knobs (using GUI prefs "
-                "for them instead): %s. Set n_parallel=None to use the "
-                "typed SDK path which supports them all.",
-                unmapped,
-            )
-
-        log.info("[loader] CLI load: %s", " ".join(args[1:]))
-        t0 = time.monotonic()
-        try:
-            with _heartbeat(f"{model_key} (CLI)"):
-                result = subprocess.run(
-                    args,
-                    capture_output=True,
-                    text=True,
-                    # Force UTF-8 with replacement so cp1252-default Windows
-                    # consoles don't blow up on lms-CLI's progress glyphs.
-                    encoding="utf-8",
-                    errors="replace",
-                    timeout=self._load_timeout,
-                )
-        except subprocess.TimeoutExpired as exc:
-            raise LoaderError(
-                f"lms load {model_key!r} timed out after "
-                f"{self._load_timeout}s"
-            ) from exc
-        except OSError as exc:
-            raise LoaderError(
-                f"lms load {model_key!r} failed to start: {exc!r}"
-            ) from exc
-        elapsed = time.monotonic() - t0
-
-        if result.returncode != 0:
-            raise LoaderError(
-                f"lms load {model_key!r} exited {result.returncode}. "
-                f"stderr: {result.stderr.strip()[:500]} | "
-                f"stdout: {result.stdout.strip()[:500]}"
-            )
-
-        # Verify it actually landed.
-        loaded = next(
-            (i for i in self.list_loaded() if i.identifier == identifier),
-            None,
-        )
-        if loaded is None:
-            raise LoaderError(
-                f"lms load {model_key!r} returned 0 but no instance with "
-                f"identifier={identifier!r} appears in list_loaded(). "
-                f"stdout: {result.stdout.strip()[:300]}"
-            )
-
-        applied = dict(norm)
-        applied["max_parallel_predictions"] = parallel  # echo it back
-        return LoadResult(
-            model_key=model_key,
-            identifier=identifier,
-            action="loaded",
-            config_applied=applied,
             duration_seconds=elapsed,
             snapshot=snap,
         )

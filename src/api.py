@@ -590,7 +590,6 @@ def _shared_loader():
 
 class LoadConfigIn(BaseModel):
     context_length: Optional[int] = None
-    n_parallel: Optional[int] = None
     flash_attention: Optional[bool] = None
     cache_type_k: Optional[str] = None
     cache_type_v: Optional[str] = None
@@ -1491,8 +1490,8 @@ def _append_verdict_to_proposal(
         "",
     ]
     excerpt = (reasoning_excerpt or "").strip()
-    if len(excerpt) > 800:
-        excerpt = excerpt[:800].rsplit(" ", 1)[0] + " …"
+    # Keep the full verdict — the 800-char cap was truncating boardroom reasoning mid-sentence.
+    # Proposal files can handle longer blocks; Obsidian renders them fine.
     if excerpt:
         for line in excerpt.splitlines() or [excerpt]:
             section.append(f"> {line}")
@@ -1817,7 +1816,8 @@ def _proposal_is_approved(proposal_id: str) -> bool:
             cur = conn.cursor()
             cur.execute(
                 "SELECT decision FROM approval_log "
-                "WHERE proposal_id = ? AND role IN ('proposal_council', 'technical_meeting') "
+                "WHERE proposal_id = ? AND role IN "
+                "('proposal_council', 'technical_meeting', 'sequential_boardroom', 'technical_board', 'boardroom') "
                 "ORDER BY id DESC LIMIT 1",
                 (proposal_id,),
             )
@@ -2068,46 +2068,30 @@ def _finalize_proposal(proposal_id: str, phase: str) -> None:
         print(f"[FINALIZE] final audit complete for {proposal_id}")
         
         # ---- Parse verdict from final audit output
-        if "VERDICT: REJECTED" in report_text:
+        from src.kanban_store import _update_card_sync, KANBAN_DB_PATH
+
+        if "VERDICT: REJECTED" in report_text or '"final_verdict": "REJECTED"' in report_text:
             print(f"[FINALIZE] {proposal_id}: BLOCKED by final audit")
-            def _update_db_rejected():
-                import asyncio
-                try:
-                    loop = asyncio.get_running_loop()
-                except RuntimeError:
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-                loop.run_until_complete(kanban_store.move_card(
-                    proposal_id=proposal_id, target_column=phase,
-                    target_substatus="rejected", approver="final_audit", 
-                    reason="Final audit rejected proposal", gate_passed=-1
-                ))
-            _update_db_rejected()
+            _update_card_sync(KANBAN_DB_PATH, proposal_id, {"substatus": "rejected"})
+            print(f"[FINALIZE] kanban updated: substatus=rejected")
             return
         
-        # ---- APPROVED: persist report and finalize
-        final_report_path = HANDOFFS_DIR / f"{proposal_id}_FINAL_AUDIT.md"
-        final_report_path.write_text(report_text, encoding="utf-8")
-        print(f"[FINALIZE] report saved: {final_report_path.name}")
+        if "VERDICT: APPROVED" in report_text or '"final_verdict": "APPROVED"' in report_text or "**APPROVED**" in report_text:
+            # ---- APPROVED: persist report, update kanban, trigger sync
+            final_report_path = HANDOFFS_DIR / f"{proposal_id}_FINAL_AUDIT.md"
+            final_report_path.write_text(report_text, encoding="utf-8")
+            print(f"[FINALIZE] report saved: {final_report_path.name}")
 
-        from src.dev_route import DevRouteManager
-        result = DevRouteManager().finalize_release(proposal_id, report_text)
-        if "error" in result:
-            print(f"[FINALIZE] release finalization FAILED for {proposal_id}: {result['error']}")
+            _update_card_sync(KANBAN_DB_PATH, proposal_id, {"substatus": "approved"})
+            print(f"[FINALIZE] kanban updated: substatus=approved")
 
-        def _update_db_final():
-            import asyncio
-            try:
-                loop = asyncio.get_running_loop()
-            except RuntimeError:
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-            loop.run_until_complete(kanban_store.update_card(
-                proposal_id=proposal_id,
-                updates={"substatus": "approved", "state_hash": ""}
-            ))
-        _update_db_final()
-        _trigger_vault_sync()
+            _trigger_vault_sync()
+        else:
+            # No clear verdict found — save the report but don't auto-approve
+            final_report_path = HANDOFFS_DIR / f"{proposal_id}_FINAL_AUDIT.md"
+            final_report_path.write_text(report_text, encoding="utf-8")
+            print(f"[FINALIZE] report saved: {final_report_path.name}")
+            print(f"[FINALIZE] WARNING: No clear APPROVED/REJECTED verdict found in report — substatus NOT updated")
     except Exception as exc:  # noqa: BLE001
         import traceback
         print(f"[FINALIZE][ERROR] {proposal_id}: {exc!r}\n{traceback.format_exc(limit=4)}")
@@ -2207,13 +2191,21 @@ async def transition_card(req: TransitionRequestPayload, background_tasks: Backg
                 ),
             )
 
-    # ---- Alpha Gate: beta_testing → alpha_polish requires BETA_HANDOFF.md
+    # ---- Alpha Gate: beta_testing → alpha_polish requires BETA_HANDOFF.md + ready-for-alpha substatus
     if req.target_column == "alpha polish":
         beta_path = HANDOFFS_DIR / f"{req.proposal_id}_BETA_HANDOFF.md"
         if not beta_path.exists():
             raise HTTPException(
                 status_code=422,
                 detail=f"Cannot move to Alpha Polish: {beta_path.name} does not exist. Finish Beta Testing first."
+            )
+        # Only check substatus on cross-column moves (beta → alpha), not reruns
+        current_card = await kanban_store.get_card(req.proposal_id)
+        is_cross_column = current_card and current_card.column_name != "alpha polish"
+        if is_cross_column and current_card.substatus not in ("ready-for-alpha", "testing", "execution.ready-for-alpha", "execution.testing"):
+            raise HTTPException(
+                status_code=422,
+                detail=f"Cannot move to Alpha Polish: card substatus is '{current_card.substatus}'. Must complete beta cycle (reach 'testing' or 'ready-for-alpha') first."
             )
 
     # ---- Finalized Gate: alpha_polish → finalized requires ALPHA_HANDOFF.md
@@ -2507,22 +2499,20 @@ from datetime import date
 
 @app.post("/api/devlog/draft")
 async def generate_devlog_draft(date_str: Optional[str] = None):
-    """Generate a DevLog draft from the specified date via the dashboard."""
+    """Generate a DevLog draft — returns raw markdown, saves to dev/devlogs/pending/."""
     try:
         today = date_str or date.today().isoformat()
         from src.devlog_agent import DevLogAgent
         from src.models.devlog import DevLogConfig
-        
-        config = DevLogConfig()
-        agent = DevLogAgent(config=config)
-        
-        evidence = agent.gather_evidence(today)
-        draft = agent.synthesize_post(evidence)
-        
+
+        agent = DevLogAgent(config=DevLogConfig())
+        markdown, saved_path = agent.generate_and_save(today)
+
         return {
             "status": "success",
             "date": today,
-            "draft": draft.model_dump() if hasattr(draft, 'model_dump') else str(draft),
+            "draft": markdown,
+            "saved_to": str(saved_path),
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"DevLog draft failed: {str(e)}")

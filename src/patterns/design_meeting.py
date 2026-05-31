@@ -1,5 +1,9 @@
 """Design Meeting pattern: Design-focused orchestration."""
-from src.patterns import PatternRequest
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from src.patterns import PatternRequest
+
 from src.council_runner import run_council
 
 
@@ -13,7 +17,7 @@ ROLES = [
 SYNTHESIS_ROLE = "design_senior"
 
 
-def execute(req: PatternRequest) -> str:
+def execute(req: 'PatternRequest') -> str:
     """
     Execute a design meeting pattern with sequential deliberation.
     
@@ -55,6 +59,7 @@ def execute(req: PatternRequest) -> str:
         progress_callback=req.progress_callback,
         output_router=req.output_router,
         memory=memory,
+        inject_system_context=False,  # Design meetings are for art/tattoo, not codebase knowledge
     )
     
     return report

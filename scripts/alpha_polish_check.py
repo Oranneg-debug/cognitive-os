@@ -13,6 +13,7 @@ Usage:
     python scripts/alpha_polish_check.py
     python scripts/alpha_polish_check.py --json     # machine-readable
     python scripts/alpha_polish_check.py --bench    # include perf smoke
+    python scripts/alpha_polish_check.py --smoke    # include runtime smoke gates (default: True)
 
 Designed to be CI-runnable AND human-runnable from a clean checkout.
 """
@@ -1081,6 +1082,191 @@ PHASE34_GATES: list[Callable[[], GateResult]] = [
     gate_phase34_test_count,
 ]
 
+SMOKE_GATES: list[Callable[[], GateResult]] = []
+
+
+# ════════════════════════════════════════════════════════════════════
+#  SMOKE GATES — ARCH-B1D2E3F4 runtime smoke gates
+# ════════════════════════════════════════════════════════════════════
+
+
+def smoke_import_core() -> GateResult:
+    """S1: Import core modules (src.llm_client, src.orchestrator, etc.)."""
+    try:
+        import sys
+        from pathlib import Path
+
+        # Ensure cognitive-os directory is on sys.path
+        if str(ROOT) not in sys.path:
+            sys.path.insert(0, str(ROOT))
+
+        import src.llm_client
+        import src.orchestrator
+        import src.council_runner
+        import src.devlog_agent
+        import src.system_context_builder
+        import src.path_guard
+        return GateResult("smoke_import_core", True, "all core imports succeeded")
+    except Exception as e:
+        return GateResult("smoke_import_core", False, f"import failed: {e}")
+
+
+def smoke_role_resolution() -> GateResult:
+    """S2: get_role_config('devlog_scribe') returns model key."""
+    try:
+        import sys
+
+        # Ensure cognitive-os directory is on sys.path
+        if str(ROOT) not in sys.path:
+            sys.path.insert(0, str(ROOT))
+
+        from src.orchestrator import get_role_config
+        cfg = get_role_config("devlog_scribe")
+        model = cfg.get("model")
+        return GateResult(
+            "smoke_role_resolution",
+            bool(model),
+            f"model={model}" if model else "no model key",
+        )
+    except Exception as e:
+        return GateResult("smoke_role_resolution", False, f"role resolution failed: {e}")
+
+
+def smoke_devlog_agent_inst() -> GateResult:
+    """S3: DevLogAgent(DevLogConfig()) returns without exception."""
+    try:
+        import sys
+
+        # Ensure cognitive-os directory is on sys.path
+        if str(ROOT) not in sys.path:
+            sys.path.insert(0, str(ROOT))
+
+        from src.devlog_agent import DevLogAgent, DevLogConfig
+        agent = DevLogAgent(DevLogConfig())
+        return GateResult("smoke_devlog_agent_inst", True, "DevLogAgent instantiated successfully")
+    except Exception as e:
+        return GateResult("smoke_devlog_agent_inst", False, f"DevLogAgent instantiation failed: {e}")
+
+
+def smoke_devlog_evidence() -> GateResult:
+    """S4: agent.gather_evidence('2026-05-30') returns dict with non-empty data."""
+    try:
+        import sys
+
+        # Ensure cognitive-os directory is on sys.path
+        if str(ROOT) not in sys.path:
+            sys.path.insert(0, str(ROOT))
+
+        from src.devlog_agent import DevLogAgent, DevLogConfig
+        agent = DevLogAgent(DevLogConfig())
+        evidence = agent.gather_evidence("2026-05-30")
+        has_data = bool(evidence.get("git_commits") or evidence.get("council_verdicts"))
+        return GateResult(
+            "smoke_devlog_evidence",
+            has_data,
+            f"evidence: {len(evidence.get('git_commits', []))} commits, {len(evidence.get('council_verdicts', []))} verdicts"
+            if evidence else "no evidence returned",
+        )
+    except Exception as e:
+        return GateResult("smoke_devlog_evidence", False, f"gather_evidence failed: {e}")
+
+
+def smoke_system_context() -> GateResult:
+    """S5: build_universal_context() returns str > 200 chars."""
+    try:
+        import sys
+
+        # Ensure cognitive-os directory is on sys.path
+        if str(ROOT) not in sys.path:
+            sys.path.insert(0, str(ROOT))
+
+        from src.system_context_builder import build_universal_context
+        ctx = build_universal_context()
+        length = len(ctx) if isinstance(ctx, str) else 0
+        return GateResult(
+            "smoke_system_context",
+            isinstance(ctx, str) and length > 200,
+            f"context length: {length} chars",
+        )
+    except Exception as e:
+        return GateResult("smoke_system_context", False, f"build_universal_context failed: {e}")
+
+
+def smoke_devlog_config() -> GateResult:
+    """S6: DevLogConfig().council_role equals 'devlog_scribe'."""
+    try:
+        import sys
+
+        # Ensure cognitive-os directory is on sys.path
+        if str(ROOT) not in sys.path:
+            sys.path.insert(0, str(ROOT))
+
+        from src.devlog_agent import DevLogConfig
+        cfg = DevLogConfig()
+        role = cfg.council_role
+        return GateResult(
+            "smoke_devlog_config",
+            role == "devlog_scribe",
+            f"council_role={role}",
+        )
+    except Exception as e:
+        return GateResult("smoke_devlog_config", False, f"DevLogConfig failed: {e}")
+
+
+def smoke_path_guard_rejects() -> GateResult:
+    """S7: PathGuard(['.private']).is_forbidden('.private/secret.md') returns True."""
+    try:
+        import sys
+
+        # Ensure cognitive-os directory is on sys.path
+        if str(ROOT) not in sys.path:
+            sys.path.insert(0, str(ROOT))
+
+        from src.path_guard import PathGuard
+        guard = PathGuard([".private"])
+        result = guard.is_forbidden(".private/secret.md")
+        return GateResult(
+            "smoke_path_guard_rejects",
+            result is True,
+            f"is_forbidden('.private/secret.md')={result}",
+        )
+    except Exception as e:
+        return GateResult("smoke_path_guard_rejects", False, f"PathGuard rejects test failed: {e}")
+
+
+def smoke_path_guard_allows() -> GateResult:
+    """S8: PathGuard(['.private']).is_forbidden('src/main.py') returns False."""
+    try:
+        import sys
+
+        # Ensure cognitive-os directory is on sys.path
+        if str(ROOT) not in sys.path:
+            sys.path.insert(0, str(ROOT))
+
+        from src.path_guard import PathGuard
+        guard = PathGuard([".private"])
+        result = guard.is_forbidden("src/main.py")
+        return GateResult(
+            "smoke_path_guard_allows",
+            result is False,
+            f"is_forbidden('src/main.py')={result}",
+        )
+    except Exception as e:
+        return GateResult("smoke_path_guard_allows", False, f"PathGuard allows test failed: {e}")
+
+
+# Add smoke gates to registry
+SMOKE_GATES = [
+    smoke_import_core,
+    smoke_role_resolution,
+    smoke_devlog_agent_inst,
+    smoke_devlog_evidence,
+    smoke_system_context,
+    smoke_devlog_config,
+    smoke_path_guard_rejects,
+    smoke_path_guard_allows,
+]
+
 BENCH_GATES: list[Callable[[], GateResult]] = [gate_perf_smoke]
 
 # DEFAULT_GATES is kept as an alias for backward compatibility with any
@@ -1138,6 +1324,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Alpha Polish CI gate")
     parser.add_argument("--json", action="store_true", help="machine-readable output")
     parser.add_argument("--bench", action="store_true", help="include perf smoke test")
+    parser.add_argument("--smoke", nargs="?", const=True, default=None, help="run runtime smoke gates (default: on)")
+    parser.add_argument("--no-smoke", action="store_true", help="skip runtime smoke gates")
     parser.add_argument(
         "--phase",
         choices=["0", "1", "2", "34", "all"],
@@ -1145,6 +1333,18 @@ def main() -> int:
         help="which phase gates to run (default: all)",
     )
     args = parser.parse_args()
+
+    # Determine if smoke gates should run
+    # --no-smoke overrides everything (skip)
+    # --smoke with no value (True) or explicit value → run
+    # no flags (None) → default to run (True)
+    run_smoke = True
+    if args.no_smoke:
+        run_smoke = False
+    elif args.smoke is False:
+        run_smoke = False
+    elif args.smoke is None:
+        run_smoke = True  # default
 
     if args.phase == "0":
         gates = list(PHASE0_GATES)
@@ -1169,6 +1369,9 @@ def main() -> int:
 
     if args.bench:
         gates.extend(BENCH_GATES)
+
+    if run_smoke:
+        gates.extend(SMOKE_GATES)
 
     results = run(gates)
     all_passed = all(r.passed for r in results)

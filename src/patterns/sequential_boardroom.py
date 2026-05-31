@@ -1,5 +1,9 @@
 """Sequential Boardroom pattern: Independent opinions + memory file."""
-from src.patterns import PatternRequest
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from src.patterns import PatternRequest
+
 from src.council_runner import run_council
 
 
@@ -16,7 +20,7 @@ ROLES = [
 SYNTHESIS_ROLE = "board_chairman"
 
 
-def execute(req: PatternRequest) -> str:
+def execute(req: 'PatternRequest') -> str:
     """
     Execute a sequential boardroom pattern with independent opinions.
     

@@ -66,13 +66,18 @@ class MemoryFileManager:
         self._write_json(file_path, memory_data)
         return True
         
-    def save_oversight_analysis(self, task_id: str, analysis: str):
+    def save_oversight_analysis(self, task_id: str, analysis: str, system_prompt: str = ""):
         """Save the oversight model's cross-reference analysis.
 
         Hardened against the silent-drop bug: if the active task file is
         missing (e.g. it was already archived by an outer error handler),
         we now log it loudly AND also try the archived path so the
         synthesis output is never thrown on the floor.
+
+        Args:
+            task_id: Task identifier
+            analysis: The synthesis/oversight analysis text
+            system_prompt: The system prompt used for the synthesis call (for auditability)
         """
         active_file = os.path.join(self.active_path, f"{task_id}.json")
         memory_data = self._read_json(active_file)
@@ -102,7 +107,10 @@ class MemoryFileManager:
             )
             return False
 
-        memory_data["oversight_analysis"] = {"raw_analysis": analysis}
+        oversight = {"raw_analysis": analysis}
+        if system_prompt:
+            oversight["system_prompt"] = system_prompt
+        memory_data["oversight_analysis"] = oversight
         self._write_json(target_file, memory_data)
         return True
             

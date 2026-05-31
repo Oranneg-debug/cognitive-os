@@ -4,7 +4,7 @@ phase: backlog
 id: "<PROPOSAL_ID>"
 origin: "<ORIGIN>"
 prefix: "<PREFIX>"
-keywords: []
+keywords: ["searchable-tag-1", "searchable-tag-2"]
 ---
 
 # <PREFIX> PROPOSAL
@@ -12,6 +12,8 @@ keywords: []
 **Proposal ID**: `<PROPOSAL_ID>`  
 **Created At**: YYYY-MM-DD HH:MM:SS  
 **Origin**: [Telegram/Obsidian/Direct/Systems-Architect/Analyst]
+
+**Keywords**: tag-1, tag-2  ← MUST fill in real searchable tags for Kanban card badges
 
 > **ID-Prefix legend**  
 > • `DEV-…` — generic dev proposal (Telegram, Obsidian, default flow)  

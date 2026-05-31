@@ -6,7 +6,11 @@ This pattern implements the Alpha transition gate with specialized roles:
 - alpha_critic: Edge cases, race conditions, security vulnerabilities
 - dev_alpha_polish: Synthesis role that produces the final JSON blueprint
 """
-from src.patterns import PatternRequest
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from src.patterns import PatternRequest
+
 from src.council_runner import run_council
 
 
@@ -20,7 +24,7 @@ ALPHA_ROLES = [
 SYNTHESIS_ROLE = "dev_alpha_polish"
 
 
-def execute(req: PatternRequest) -> str:
+def execute(req: 'PatternRequest') -> str:
     """
     Execute the Alpha Council pattern for Alpha Polish phase validation.
     
@@ -56,6 +60,7 @@ def execute(req: PatternRequest) -> str:
         progress_callback=req.progress_callback,
         output_router=req.output_router,
         memory=MemoryFileManager(),
+        brand_guard_enabled=False,  # Compass injected; avoid extra load/unload cycles
     )
     
     return report

@@ -135,9 +135,9 @@ def test_synthesize_post_uses_devlog_scribe_role(agent: DevLogAgent) -> None:
         mock_llm.return_value = json.dumps(mock_response)
         agent.synthesize_post(evidence)
 
-        # Verify the role was used
+        # Verify the role was resolved to the correct model key
         call_kwargs = mock_llm.call_args[1]
-        assert call_kwargs.get("model") == "devlog_scribe"
+        assert call_kwargs.get("model") == "ministral-3-3b-instruct-2512"
 
 
 # ════════════════════════════════════════════════════════════════════

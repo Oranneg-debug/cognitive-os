@@ -1,6 +1,6 @@
 document.addEventListener('DOMContentLoaded', () => {
     const rolesList = document.getElementById('roles-list');
-    const modelsList = document.getElementById('models-list');
+    const modelsList = document.getElementById('models-list'); // may be created dynamically in populateSidebar()
     const configTitle = document.getElementById('config-title');
     const configPanel = document.getElementById('config-panel');
     const saveBtn = document.getElementById('save-btn');
@@ -35,6 +35,53 @@ document.addEventListener('DOMContentLoaded', () => {
         { cmd: '/dev',       emoji: '🧪', name: 'Dev Lifecycle',
           desc: 'Creates a proposal in SQLite-backed kanban store (Backlog column). Use #dev in chatbox for proper workflow.',
           target: 'DevRouteManager' },
+    ];
+
+    // ── Council / role-group configuration ────────────────────────
+    // Single source of truth for which roles belong to which council.
+    const COUNCIL_CONFIG = [
+        // ── Kanban-triggered councils ─────────────────────────────
+        // Ordered by kanban column: proposal→beta_testing runs TECHNICAL_MEETING;
+        // beta_testing→alpha_polish runs ALPHA_COUNCIL;
+        // alpha_polish→finalized runs FINAL_AUDIT.
+        { id:'technical', name:'Beta Testing (Technical)', icon:'🔧',
+          desc:'Kanban trigger: draft → expand → critique → CTO synthesis',
+          accent:'#4a90d9', section:'councils',
+          roles:['drafting_architect','creative_expansionist',
+                 'technical_critic','chief_technical_officer'] },
+        { id:'alpha', name:'Alpha Polish', icon:'✨',
+          desc:'Kanban trigger: UX → performance → critique → dev_alpha_polish',
+          accent:'#e67e22', section:'councils',
+          roles:['alpha_ux_specialist','alpha_perf_specialist',
+                 'alpha_critic','dev_alpha_polish'] },
+        { id:'final-audit', name:'Final Audit', icon:'✅',
+          desc:'Kanban trigger: final_scribe → dev_final_audit verdict',
+          accent:'#27ae60', section:'councils',
+          roles:['final_scribe','dev_final_audit'] },
+
+        // ── Manual-pattern councils (not kanban-triggered) ────────
+        { id:'boardroom', name:'Boardroom', icon:'🏛',
+          desc:'5-seat council → Chairman synthesis (/boardroom)',
+          accent:'#c9a227', section:'councils',
+          roles:['board_strategist','board_specialist','board_critic',
+                 'board_creative','board_logical','board_chairman'] },
+        { id:'design', name:'Design Council', icon:'🎨',
+          desc:'Junior → Creative → Critic → Senior (/design)',
+          accent:'#e74c3c', section:'councils',
+          roles:['design_junior','creative_expansionist',
+                 'design_critic','design_senior'] },
+
+        // ── Core Services (used by simple/standard/flow patterns) ──
+        { id:'fast-ops', name:'Fast Operations', icon:'⚡',
+          desc:'Single-model passes (/simple, /standard, /vision)',
+          accent:'#6e6e6e', section:'services',
+          roles:['simple','standard','vision'] },
+        { id:'flow-control', name:'Flow Control', icon:'🎭',
+          desc:'Orchestration, guard, scribe & handoff',
+          accent:'#6e6e6e', section:'services',
+          roles:['moderator','brand_guard','scribe',
+                 'handoff','handoff_planner','devlog_scribe',
+                 'technical_specialist','dev_beta_council'] }
     ];
 
     let fullConfig = {};
@@ -238,84 +285,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- Data Fetching and Initialization ---
 
-    // Council topology configuration (D1)
-    const COUNCIL_TOPOLOGY = {
-        "proposal": {
-            name: "Proposal Phase",
-            description: "Proposal council runs based on severity",
-            councils: [
-                { severity: "high", council: "Sequential Boardroom", roles: ["board_strategist", "board_specialist", "board_critic", "board_creative", "board_logical", "board_chairman"] },
-                { severity: "medium", council: "Technical Meeting", roles: ["technical_specialist", "creative_expansionist", "technical_critic", "overseer"] },
-                { severity: "low", council: "Auto-Approval", roles: ["system"] }
-            ]
-        },
-        "beta_testing": {
-            name: "Beta Phase",
-            description: "Dev Beta Council produces handoff doc",
-            councils: [
-                { council: "Dev Beta Council", roles: ["dev_beta_planning", "dev_beta_coding", "dev_beta_debugging", "dev_beta_review"] }
-            ]
-        },
-        "alpha_polish": {
-            name: "Alpha Phase",
-            description: "Alpha Council produces Alpha Handoff",
-            councils: [
-                { council: "Alpha Council", roles: ["alpha_ux", "alpha_perf", "alpha_critic", "dev_alpha_polish"] }
-            ]
-        },
-        "finalized": {
-            name: "Final Phase",
-            description: "Final Audit validates release readiness",
-            councils: [
-                { council: "Final Audit", roles: ["final_scribe", "dev_final_audit"] }
-            ]
-        }
-    };
-
-    // Render council topology diagram (D1)
-    function renderCouncilTopology() {
-        const container = document.getElementById('council-topology');
-        if (!container) return;
-        
-        let html = '<div class="council-topology-visual">\n';
-        html += '  <h3>Council Flow Diagram</h3>\n';
-        html += '  <div class="council-flow">\n';
-        html += '    <div class="flow-step"><strong>Proposal</strong><br><small>Boardroom (high) / Technical (medium) / Auto (low)</small></div>\n';
-        html += '    <div class="arrow">↓</div>\n';
-        html += '    <div class="flow-step"><strong>Beta Testing</strong><br><small>Dev Beta Council → Handoff</small></div>\n';
-        html += '    <div class="arrow">↓</div>\n';
-        html += '    <div class="flow-step"><strong>Alpha Polish</strong><br><small>Alpha Council → Handoff</small></div>\n';
-        html += '    <div class="arrow">↓</div>\n';
-        html += '    <div class="flow-step"><strong>Finalized</strong><br><small>Final Audit</small></div>\n';
-        html += '  </div>\n';
-        html += '</div>\n';
-        html += '<div class="council-details">\n';
-        html += '  <h3>Current Council Status</h3>\n';
-        html += '  <div id="current-council-info" class="council-status-card">\n';
-        html += '    <p class="placeholder">Loading council status...</p>\n';
-        html += '  </div>\n';
-        html += '</div>\n';
-        
-        container.innerHTML = html;
-        
-        // Try to get current council lock status
-        fetch('/api/loaded').then(async response => {
-            if (response.ok) {
-                // Check if we can determine which council is running
-                // For now, just show that the system is ready
-                const info = document.getElementById('current-council-info');
-                if (info) {
-                    info.innerHTML = '<div class="council-ready">✅ <strong>System Ready</strong><br>Ready to process proposals. Councils will run automatically based on proposal severity and phase.</div>';
-                }
-            }
-        }).catch(() => {
-            const info = document.getElementById('current-council-info');
-            if (info) {
-                info.innerHTML = '<div class="council-ready">✅ <strong>System Ready</strong><br>Councils configured and ready to execute.</div>';
-            }
-        });
-    }
-
     async function loadConfig() {
         try {
             // Fetch config and live models concurrently for speed
@@ -346,76 +315,159 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function populateSidebar() {
         rolesList.innerHTML = '';
-        modelsList.innerHTML = '';
+        // modelsList is built dynamically inside the card below
 
-        const allRoles = Object.keys(fullConfig.roles || {}).sort();
-        
-        const roleGroups = {
-            "Dev Team": allRoles.filter(k => k.startsWith('dev_')),
-            "Boardroom": allRoles.filter(k => k.startsWith('board_')),
-            "Technical Meeting": allRoles.filter(k => k.startsWith('technical_')),
-            "Design Meeting": allRoles.filter(k => k.startsWith('design_')),
-            "Oracle Council": allRoles.filter(k => k.startsWith('oracle_')),
-            "System & Base": allRoles.filter(k => k === 'simple' || k === 'standard' || k === 'vision' || k === 'nft_specialist'),
-            "Core Flow Control": allRoles.filter(k => k === 'moderator' || k === 'brand_guard' || k === 'scribe'),
-            "Other": allRoles.filter(k => !k.startsWith('dev_') && !k.startsWith('board_') && 
-                                          !k.startsWith('technical_') && !k.startsWith('design_') && 
-                                          !k.startsWith('oracle_') && 
-                                          !['simple', 'standard', 'vision', 'nft_specialist', 'moderator', 'brand_guard', 'scribe'].includes(k))
-        };
+        const allRoleKeys = Object.keys(fullConfig.roles || {}).sort();
+        const assignedRoles = new Set();
 
-        // Clear and build the roles list with groups
-        rolesList.innerHTML = '';
-        for (const groupName in roleGroups) {
-            const roles = roleGroups[groupName];
-            if (roles.length > 0 || groupName !== 'Other') { // Always show non-Other groups
-                const h2 = document.createElement('h2');
-                h2.textContent = groupName;
-                h2.dataset.group = groupName;
-                rolesList.appendChild(h2);
+        // ── Councils section ────────────────────────────────
+        const councilsHdr = document.createElement('h2');
+        councilsHdr.textContent = '📋 Councils';
+        councilsHdr.className = 'section-divider';
+        rolesList.appendChild(councilsHdr);
 
-                const ul = document.createElement('ul');
-                ul.dataset.group = groupName;
-                roles.forEach(key => {
-                    const li = document.createElement('li');
-                    const roleSpan = document.createElement('span');
-                    roleSpan.textContent = key;
-                    li.appendChild(roleSpan);
-                    
-                    // Add delete button
-                    const deleteBtn = document.createElement('button');
-                    deleteBtn.className = 'delete-role-btn';
-                    deleteBtn.textContent = '×';
-                    deleteBtn.title = 'Delete this role';
-                    deleteBtn.onclick = (e) => {
-                        e.stopPropagation();
-                        handleDeleteRole(key);
-                    };
-                    li.appendChild(deleteBtn);
-                    
-                    li.dataset.type = 'role';
-                    li.dataset.key = key;
-                    ul.appendChild(li);
-                });
-                rolesList.appendChild(ul);
-                
-                // Add "Add Role" button for this category
-                const addBtn = document.createElement('button');
-                addBtn.className = 'add-role-category-btn';
-                addBtn.textContent = `+ Add ${groupName} Role`;
-                addBtn.dataset.group = groupName;
-                addBtn.onclick = () => handleAddRoleToCategory(groupName);
-                rolesList.appendChild(addBtn);
-            }
+        COUNCIL_CONFIG.forEach(council => {
+            const councilRoles = council.roles.filter(r => allRoleKeys.includes(r));
+            councilRoles.forEach(r => assignedRoles.add(r));
+            rolesList.appendChild(buildCouncilCard(council, councilRoles));
+        });
+
+        // ── Core Services section ───────────────────────────
+        const svcHdr = document.createElement('h2');
+        svcHdr.textContent = '⚙️ Core Services';
+        svcHdr.className = 'section-divider';
+        rolesList.appendChild(svcHdr);
+
+        COUNCIL_CONFIG.filter(c => c.section === 'services').forEach(council => {
+            const councilRoles = council.roles.filter(r => allRoleKeys.includes(r));
+            councilRoles.forEach(r => assignedRoles.add(r));
+            rolesList.appendChild(buildCouncilCard(council, councilRoles));
+        });
+
+        // ── Unassigned fallback ─────────────────────────────
+        const unassigned = allRoleKeys.filter(r => !assignedRoles.has(r));
+        if (unassigned.length > 0) {
+            const warnHdr = document.createElement('h2');
+            warnHdr.textContent = '⚠️ Unassigned';
+            warnHdr.className = 'section-divider warning';
+            rolesList.appendChild(warnHdr);
+            unassigned.forEach(key => {
+                const li = document.createElement('li');
+                li.innerHTML = `<span>${key}</span>`;
+                li.dataset.type = 'role';
+                li.dataset.key = key;
+                li.style.padding = '8px 12px';
+                rolesList.appendChild(li);
+            });
         }
 
+        // ── Base Models (collapsible card) ─────────────────────
+        const modelsCard = document.createElement('div');
+        modelsCard.className = 'council-card';
+        modelsCard.style.setProperty('--council-accent', '#8a8a8a');
+        const modelsHeader = document.createElement('div');
+        modelsHeader.className = 'council-card-header';
+        modelsHeader.innerHTML = '<span class="council-icon">📦</span><span class="council-name">Base Models</span><span class="council-chevron">▼</span>';
+        const modelsUl = document.getElementById('models-list') || document.createElement('ul');
+        modelsUl.className = 'council-role-list';
+        if (!document.getElementById('models-list')) {
+            modelsUl.id = 'models-list';
+        }
+        modelsUl.innerHTML = '';
         Object.keys(fullConfig.models || {}).sort().forEach(key => {
             const li = document.createElement('li');
             li.textContent = key;
             li.dataset.type = 'model';
             li.dataset.key = key;
-            modelsList.appendChild(li);
+            modelsUl.appendChild(li);
         });
+        modelsHeader.addEventListener('click', () => {
+            const isCollapsed = modelsCard.classList.toggle('collapsed');
+            try { localStorage.setItem('council-collapse-models', isCollapsed ? 'collapsed' : 'open'); } catch(_) {}
+        });
+        const savedModels = (() => { try { return localStorage.getItem('council-collapse-models'); } catch(_) { return null; } })();
+        if (savedModels === 'collapsed') modelsCard.classList.add('collapsed');
+        modelsCard.appendChild(modelsHeader);
+        modelsCard.appendChild(modelsUl);
+        rolesList.appendChild(modelsCard);
+    }
+
+    function buildCouncilCard(council, roles) {
+        const card = document.createElement('div');
+        card.className = 'council-card';
+        card.style.setProperty('--council-accent', council.accent);
+        card.dataset.councilId = council.id;
+
+        // Header row (click to collapse)
+        const header = document.createElement('div');
+        header.className = 'council-card-header';
+        header.innerHTML = `<span class="council-icon">${council.icon}</span>
+                            <span class="council-name">${council.name}</span>
+                            <span class="council-count">${roles.length} roles</span>
+                            <span class="council-chevron">▼</span>`;
+
+        // Description
+        const desc = document.createElement('div');
+        desc.className = 'council-card-desc';
+        desc.textContent = council.desc;
+
+        // Role list
+        const ul = document.createElement('ul');
+        ul.className = 'council-role-list';
+
+        if (roles.length === 0) {
+            const empty = document.createElement('li');
+            empty.className = 'council-empty';
+            empty.textContent = '(no roles configured)';
+            ul.appendChild(empty);
+        } else {
+            roles.forEach(key => {
+                const li = document.createElement('li');
+                const roleSpan = document.createElement('span');
+                roleSpan.textContent = key;
+                li.appendChild(roleSpan);
+
+                const deleteBtn = document.createElement('button');
+                deleteBtn.className = 'delete-role-btn';
+                deleteBtn.textContent = '×';
+                deleteBtn.title = 'Delete this role';
+                deleteBtn.onclick = (e) => {
+                    e.stopPropagation();
+                    handleDeleteRole(key);
+                };
+                li.appendChild(deleteBtn);
+
+                li.dataset.type = 'role';
+                li.dataset.key = key;
+                ul.appendChild(li);
+            });
+        }
+
+        // Add-role button
+        const addBtn = document.createElement('button');
+        addBtn.className = 'add-role-category-btn';
+        addBtn.textContent = `+ Add ${council.name} Role`;
+        addBtn.onclick = () => handleAddRoleToCouncil(council);
+
+        card.appendChild(header);
+        card.appendChild(desc);
+        card.appendChild(ul);
+        card.appendChild(addBtn);
+
+        // Collapse toggle
+        header.addEventListener('click', () => {
+            const isCollapsed = card.classList.toggle('collapsed');
+            try { localStorage.setItem(`council-collapse-${council.id}`, isCollapsed ? 'collapsed' : 'open'); }
+            catch(_) {}
+        });
+
+        // Restore state (services start collapsed by default)
+        const saved = (() => { try { return localStorage.getItem(`council-collapse-${council.id}`); } catch(_) { return null; } })();
+        if (saved === 'collapsed' || (saved === null && council.section === 'services')) {
+            card.classList.add('collapsed');
+        }
+
+        return card;
     }
 
     // --- UI Rendering ---
@@ -503,10 +555,10 @@ document.addEventListener('DOMContentLoaded', () => {
         resourcesSection.appendChild(createNumberInput('max_tokens', data.max_tokens, 'Max Tokens'));
         resourcesSection.appendChild(createNumberInput('context_window', data.context_window, 'Context Window', contextHint));
         resourcesSection.appendChild(createRangeInput('gpu_offload_ratio', data.gpu_offload_ratio !== undefined ? data.gpu_offload_ratio : "max", 'GPU Offload Ratio', '0 (CPU-only) to 1 (max GPU)', 0, 1, 0.1));
-        resourcesSection.appendChild(createNumberInput('n_parallel', data.n_parallel, 'Data Parallelism (n_parallel)', 'Concurrent request handling (1-16). Note: Tensor parallelism requires LM Studio SDK configuration'));
-        resourcesSection.appendChild(createNumberInput('batch_size', data.batch_size || 512, 'Batch Size', 'Number of tokens to process per batch'));
-        resourcesSection.appendChild(createSelect('k_cache_quant', data.k_cache_quant || 'q8_0', 'K-Cache Quantization', ['f16', 'q8_0', 'q4_0']));
-        resourcesSection.appendChild(createSelect('v_cache_quant', data.v_cache_quant || 'q8_0', 'V-Cache Quantization', ['f16', 'q8_0', 'q4_0']));
+        resourcesSection.appendChild(createSelect('k_cache_quant', data.k_cache_quant, 'K-Cache Quantization', ['f16', 'q8_0', 'q4_0']));
+        resourcesSection.appendChild(createSelect('v_cache_quant', data.v_cache_quant, 'V-Cache Quantization', ['f16', 'q8_0', 'q4_0']));
+        resourcesSection.appendChild(createSelect('flash_attention', data.flash_attention, 'Flash Attention', ['true', 'false']));
+        resourcesSection.appendChild(createNumberInput('n_parallel', data.n_parallel, 'N-Parallel', 'Concurrent request slots (CLI override, not in SDK)'));
         configPanel.appendChild(resourcesSection);
 
         // Advanced Section (only for roles)
@@ -554,12 +606,22 @@ document.addEventListener('DOMContentLoaded', () => {
         const select = document.createElement('select');
         select.id = `config-${key}`;
         select.dataset.key = key;
+        // Empty placeholder — no phantom defaults. The value must exist in
+        // master_config.md, otherwise the field is explicitly unconfigured.
+        const emptyOpt = document.createElement('option');
+        emptyOpt.value = '';
+        emptyOpt.textContent = '—';
+        if (!value) emptyOpt.selected = true;
+        select.appendChild(emptyOpt);
         options.forEach(option => {
             const opt = document.createElement('option');
             opt.value = option;
             opt.textContent = option;
-            if (option === value) {
+            // Normalise both sides to strings: JSON bool true/false from API
+            // will match string 'true'/'false' in the options array.
+            if (String(option) === String(value)) {
                 opt.selected = true;
+                emptyOpt.selected = false;
             }
             select.appendChild(opt);
         });
@@ -1015,11 +1077,6 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        // Config tab: render council topology
-        if (tabName === 'config') {
-            renderCouncilTopology();
-        }
-
         // DevLog tab: set default date to today
         if (tabName === 'devlog') {
             const dateInput = document.getElementById('devlog-date');
@@ -1115,15 +1172,16 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- Event Handlers ---
 
     function handleSidebarClick(event) {
-        if (event.target.tagName === 'LI') {
-            // Remove active class from all items
-            document.querySelectorAll('.sidebar li').forEach(li => li.classList.remove('active'));
-            // Add active class to clicked item
-            event.target.classList.add('active');
-            
-            const { type, key } = event.target.dataset;
-            renderConfigForm(type, key);
-        }
+        // Find the nearest LI (handles clicks on spans/buttons inside LIs)
+        const li = event.target.closest('li');
+        if (!li) return;
+        if (!li.dataset.type || !li.dataset.key) return;
+
+        // Remove active class from all items
+        document.querySelectorAll('#roles-list li').forEach(el => el.classList.remove('active'));
+        // Add active class to clicked item
+        li.classList.add('active');
+        renderConfigForm(li.dataset.type, li.dataset.key);
     }
 
     function handleInputChange(event) {
@@ -1147,10 +1205,11 @@ document.addEventListener('DOMContentLoaded', () => {
         
         const { type, key: configKey } = currentSelection;
         if (type && configKey) {
-            if (type === 'role') {
-                fullConfig.roles[configKey][key] = value;
+            const targetObj = type === 'role' ? fullConfig.roles[configKey] : fullConfig.models[configKey];
+            if (value === '' || value === null || value === undefined) {
+                delete targetObj[key]; // remove key entirely — no phantom empties
             } else {
-                fullConfig.models[configKey][key] = value;
+                targetObj[key] = value;
             }
         }
     }
@@ -1170,13 +1229,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 throw new Error(errorData.detail || 'Failed to save configuration');
             }
 
+            await loadConfig();
             hasChanges = false;
             saveBtn.disabled = true;
             saveBtn.textContent = 'Saved Successfully!';
             saveBtn.classList.add('success');
-            
-            // Optionally, reload config to ensure sync, though not strictly necessary
-            // await loadConfig();
+            if (currentSelection.type && currentSelection.key) {
+                renderConfigForm(currentSelection.type, currentSelection.key);
+            }
 
         } catch (error) {
             console.error('Error saving config:', error);
@@ -1184,13 +1244,52 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    /*────────────────────────────────────────────────────────────────
+     * Bidirectional sync
+     * 1. Dashboard → master_config.md  (save — handled above)
+     * 2. External → dashboard  (poll — reload if changed without dirty buffer)
+     *───────────────────────────────────────────────────────────────*/
+    let _lastKnownConfigHash = '';
+
+    async function computeConfigHash() {
+        try {
+            const r = await fetch('/api/config');
+            if (!r.ok) return null;
+            return JSON.stringify(await r.json());
+        } catch { return null; }
+    }
+
+    async function syncFromDisk() {
+        const hash = await computeConfigHash();
+        if (hash && hash !== _lastKnownConfigHash) {
+            if (hasChanges) {
+                // Dashboard has unsaved changes — warn, don't overwrite.
+                console.warn('[SYNC] External config change detected, but dashboard has unsaved edits — skipping sync.');
+                return;
+            }
+            console.log('[SYNC] External config change detected — reloading.');
+            await loadConfig();
+            _lastKnownConfigHash = hash;
+            // Re-render current form to stay on selected item
+            if (currentSelection.type && currentSelection.key) {
+                renderConfigForm(currentSelection.type, currentSelection.key);
+            }
+        }
+    }
+
+    // Initial hash
+    (async () => {
+        _lastKnownConfigHash = await computeConfigHash() || '';
+    })();
+
+    // Poll every 15 seconds for external changes
+    setInterval(syncFromDisk, 15000);
+
     /**
-     * Run an orchestration against /process. `cmd` is "/simple", "/boardroom", …
-     * or "auto" to let the Sentry Router decide.
+     * Run an orchestration against /process.
      */
     async function runOrchestration(cmd, prompt, { compass = '' } = {}) {
         if (!prompt || !prompt.trim()) {
-            throw new Error('Prompt is empty.');
         }
         const composed = (cmd && cmd !== 'auto')
             ? `${cmd} ${prompt}`
@@ -1277,27 +1376,14 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- Initial Setup ---
 
     function initializeCollapsibleMenus() {
-        const sidebarHeaders = document.querySelectorAll('.sidebar h2');
-        sidebarHeaders.forEach(header => {
-            const list = header.nextElementSibling;
-            if (list) {
-                // Start with menus collapsed
-                list.style.display = 'none';
-                header.classList.add('collapsed');
-            }
-
-            header.addEventListener('click', () => {
-                if (list) {
-                    const isCollapsed = list.style.display === 'none';
-                    list.style.display = isCollapsed ? 'block' : 'none';
-                    header.classList.toggle('collapsed', !isCollapsed);
-                }
-            });
-        });
+        // Councils and Models use .council-card collapse (handled in
+        // buildCouncilCard and populateSidebar respectively).
+        // Keep as no-op for backwards compat with call sites.
     }
 
     rolesList.addEventListener('click', handleSidebarClick);
-    modelsList.addEventListener('click', handleSidebarClick);
+    // modelsList is created dynamically inside rolesList; use event delegation
+    // on the parent (rolesList) which already has the click handler above.
     saveBtn.addEventListener('click', handleSaveClick);
     tabs.forEach(tab => tab.addEventListener('click', handleTabClick));
     
@@ -1471,33 +1557,24 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     
     async function handleAddRole() {
-        handleAddRoleToCategory('Other');
+        // Prompt user to pick a council first
+        const councilNames = COUNCIL_CONFIG.map(c => c.name).join('\n');
+        const choice = prompt(`Which council should this role belong to?\n\n${councilNames}\n\nEnter council name:`, 'Fast Operations');
+        if (!choice) return;
+        const council = COUNCIL_CONFIG.find(c => c.name.toLowerCase() === choice.trim().toLowerCase());
+        if (!council) { alert(`Unknown council "${choice}". Please pick from the list.`); return; }
+        handleAddRoleToCouncil(council);
     }
-    
-    async function handleAddRoleToCategory(groupName) {
-        // Determine prefix based on group
-        const prefixes = {
-            'Dev Team': 'dev_',
-            'Boardroom': 'board_',
-            'Technical Meeting': 'technical_',
-            'Design Meeting': 'design_',
-            'Oracle Council': 'oracle_',
-            'System & Base': '',
-            'Core Flow Control': '',
-            'Other': ''
-        };
-        
-        const prefix = prefixes[groupName] || '';
-        const roleName = prompt(`Enter the name for the new ${groupName} role:`, prefix);
+
+    async function handleAddRoleToCouncil(council) {
+        const roleName = prompt(`Enter the name for the new ${council.name} role:`);
         if (!roleName || !roleName.trim()) return;
-        
-        // Check if role already exists
+
         if (fullConfig.roles && fullConfig.roles[roleName]) {
             alert(`Role "${roleName}" already exists!`);
             return;
         }
-        
-        // Create new role with default values
+
         const newRole = {
             enabled: true,
             model: Object.keys(fullConfig.models || {})[0] || '',
@@ -1510,42 +1587,32 @@ document.addEventListener('DOMContentLoaded', () => {
             max_tokens: 2048,
             context_window: 8192,
             gpu_layers: -1,
-            n_parallel: 1,
             kv_cache: 512,
             reasoning_enabled: false,
             compass_weight: 'MEDIUM WEIGHT'
         };
-        
-        // Add to config
+
         if (!fullConfig.roles) fullConfig.roles = {};
         fullConfig.roles[roleName] = newRole;
-        
-        // Save config
+
+        // Also add to the council's static role list so it renders there
+        if (!council.roles.includes(roleName)) council.roles.push(roleName);
+
         try {
             const response = await fetch('/api/config', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(fullConfig),
             });
-            
-            if (!response.ok) {
-                throw new Error('Failed to save new role');
-            }
-            
-            // Reload UI
+            if (!response.ok) throw new Error('Failed to save new role');
             await loadConfig();
-            
-            // Select the new role
             const newRoleElement = document.querySelector(`li[data-key="${roleName}"][data-type="role"]`);
-            if (newRoleElement) {
-                newRoleElement.click();
-            }
-            
+            if (newRoleElement) newRoleElement.click();
         } catch (error) {
             console.error('Error creating role:', error);
             alert(`Failed to create role: ${error.message}`);
-            // Remove from local config if save failed
             delete fullConfig.roles[roleName];
+            council.roles = council.roles.filter(r => r !== roleName);
         }
     }
     
@@ -1633,7 +1700,6 @@ document.addEventListener('DOMContentLoaded', () => {
                         max_tokens: 2048,
                         context_window: 8192,
                         gpu_layers: -1,
-                        n_parallel: 1,
                         kv_cache: 512,
                         reasoning_enabled: false,
                         compass_weight: 'MEDIUM WEIGHT'
@@ -1702,17 +1768,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 'Top K': modelConfig.top_k || '40',
                 'Max Tokens': modelConfig.max_tokens || '2048',
                 'Batch Size': modelConfig.batch_size || '512',
-                'N-Parallel': modelConfig.n_parallel || modelConfig.n_parallel || '1',
                 'GPU Layers': modelConfig.gpu_layers || '-1',
-                'K-Cache Quant': modelConfig.k_cache_quant || 'q8_0',
-                'V-Cache Quant': modelConfig.v_cache_quant || 'q8_0',
+                'K-Cache Quant': modelConfig.k_cache_quant || '—',
+                'V-Cache Quant': modelConfig.v_cache_quant || '—',
                 'Flash Attention': model.flash_attention !== undefined ? model.flash_attention : 'auto'
             };
             
             defaultsContainer.innerHTML = Object.entries(defaults).map(([label, value]) => `
                 <div class="model-default-item">
                     <label>${label}</label>
-                    <div class="value ${['Context Length', 'GPU Layers', 'N-Parallel', 'Batch Size'].includes(label) ? 'highlight' : ''}">
+                    <div class="value ${['Context Length', 'GPU Layers', 'Batch Size'].includes(label) ? 'highlight' : ''}">
                         ${value}
                     </div>
                 </div>
@@ -1881,7 +1946,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (v !== null && v !== '') cfg[key] = transform(v);
             };
             setIfPresent('context_length', Number);
-            setIfPresent('n_parallel', Number);
             // gpu_offload_ratio accepts 'max' | 'off' | float 0.0–1.0.
             // Pass strings through as-is so the backend sees the canonical
             // shape; numeric strings convert to float.
@@ -1895,6 +1959,7 @@ document.addEventListener('DOMContentLoaded', () => {
             });
             setIfPresent('cache_type_k');
             setIfPresent('cache_type_v');
+            setIfPresent('n_parallel', Number);
             const fa = fd.get('flash_attention');
             if (fa === 'true') cfg.flash_attention = true;
             else if (fa === 'false') cfg.flash_attention = false;

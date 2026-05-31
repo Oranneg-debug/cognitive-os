@@ -328,7 +328,7 @@ def _update_card_sync(db_path: Path, proposal_id: str, updates: dict) -> Card:
         params = []
         for key, value in updates.items():
             # Basic sanitization to prevent SQL injection on field names
-            if key not in ("title", "substatus", "severity", "origin", "keywords"):
+            if key not in ("title", "substatus", "severity", "origin", "keywords", "state_hash"):
                 raise ValueError(f"Invalid field for update: {key}")
             set_clauses.append(f"{key} = ?")
             params.append(value)

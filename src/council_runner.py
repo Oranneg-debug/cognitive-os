@@ -1,5 +1,6 @@
 import json
 import logging
+import sys
 from typing import Optional, Callable
 
 from src.llm_client import llm
@@ -181,6 +182,9 @@ def run_council(
     progress_callback: Optional[Callable] = None,
     output_router: Optional[OutputRouter] = None,
     memory: Optional[MemoryFileManager] = None,
+    inject_system_context: bool = True,
+    brand_guard_enabled: bool = True,
+    moderator_enabled: bool = True,
 ) -> str:
     """
     Production-grade meeting execution with JSON handoffs, sequential context passing, and Brand Guard audits.
@@ -198,6 +202,8 @@ def run_council(
         progress_callback: Optional callback for progress updates
         output_router: Optional OutputRouter for routing synthesis output
         memory: Optional MemoryFileManager instance (creates new if not provided)
+        inject_system_context: Whether to inject system context (codebase knowledge) into prompts.
+            Set to False for non-technical patterns like design_meeting (art/tattoo).
     
     Returns:
         The final synthesized report as a markdown string
@@ -214,38 +220,49 @@ def run_council(
         progress_callback(msg_start)
     
     llm.eject_all_models()
+    print(f"[COUNCIL] All models ejected, starting council with {len(role_sequence)} roles + synthesis")
     
     # 1. Moderator Framing
-    mod_config = get_role_config("moderator")
-    if mod_config.get("enabled", True):
-        msg_mod = "[MODERATOR] Moderator is framing the discussion..."
-        if progress_callback:
-            progress_callback(msg_mod)
-        
-        mod_response = llm.generate_response(
-            prompt=f"Task: {user_input}\nFrame the meeting and assign the first speaker from: {', '.join(role_sequence)}",
-            system_prompt=mod_config["system_prompt"],
-            model=mod_config["model"],
-            temperature=mod_config.get("temperature", 0.4),
-            max_tokens=mod_config.get("max_tokens", 512),
-            gpu_layers=mod_config.get("gpu_layers", 0),
-            top_p=mod_config.get("top_p", 0.9),
-            top_k=mod_config.get("top_k", 40),
-            repeat_penalty=mod_config.get("repeat_penalty", 1.1),
-            min_p=mod_config.get("min_p", 0.0),
-            context_window=mod_config.get("context_window", 8192),
-            flash_attention=mod_config.get("flash_attention"),
-            cache_type_k=mod_config.get("k_cache_quant"),
-            cache_type_v=mod_config.get("v_cache_quant"),
-            gpu_offload_ratio=mod_config.get("gpu_offload_ratio"),
-            n_parallel=mod_config.get("n_parallel"),
-            reasoning_enabled=mod_config.get("reasoning_enabled"),
-            batch_size=mod_config.get("batch_size"),
-        )
-        mod_data = _extract_json(mod_response)
-        memory.save_opinion(task_id, "moderator", mod_config["model"], json.dumps(mod_data))
+    if moderator_enabled:
+        mod_config = get_role_config("moderator")
+        if mod_config.get("enabled", True):
+            msg_mod = "[MODERATOR] Moderator is framing the discussion..."
+            print(f"--> {msg_mod}")
+            if progress_callback:
+                progress_callback(msg_mod)
+            
+            try:
+                mod_response = llm.generate_response(
+                    prompt=f"Task: {user_input}\nFrame the meeting and assign the first speaker from: {', '.join(role_sequence)}",
+                    system_prompt=mod_config["system_prompt"],
+                    model=mod_config["model"],
+                    temperature=mod_config.get("temperature", 0.4),
+                    max_tokens=mod_config.get("max_tokens", 512),
+                    gpu_layers=mod_config.get("gpu_layers", 0),
+                    top_p=mod_config.get("top_p", 0.9),
+                    top_k=mod_config.get("top_k", 40),
+                    repeat_penalty=mod_config.get("repeat_penalty", 1.1),
+                    min_p=mod_config.get("min_p", 0.0),
+                    context_window=mod_config.get("context_window", 8192),
+                    flash_attention=mod_config.get("flash_attention"),
+                    cache_type_k=mod_config.get("k_cache_quant"),
+                    cache_type_v=mod_config.get("v_cache_quant"),
+                    gpu_offload_ratio=mod_config.get("gpu_offload_ratio"),
+                    reasoning_enabled=mod_config.get("reasoning_enabled"),
+                    batch_size=mod_config.get("batch_size"),
+                )
+                mod_data = _extract_json(mod_response)
+                memory.save_opinion(task_id, "moderator", mod_config["model"], json.dumps(mod_data))
+                print(f"[MODERATOR] Framing complete, next role: {mod_data.get('next_role', 'N/A')}")
+            except Exception as e:
+                print(f"[MODERATOR] ERROR during framing: {e}")
+                import traceback
+                traceback.print_exc()
+                # Continue without moderator - not fatal
+        else:
+            print("[MODERATOR] Skipped (disabled in config).")
     else:
-        print("[MODERATOR] Skipped (disabled in config).")
+        print("[MODERATOR] Skipped (moderator_enabled=False).")
     
     # Initialize meeting history for context
     meeting_history = _format_meeting_history(task_id, memory)
@@ -284,75 +301,89 @@ INSTRUCTIONS:
 
         # Agent Turn
         base_system_prompt = c.get("system_prompt", "")
-        context_injected = _inject_system_context(base_system_prompt)
-        final_system_prompt = _inject_compass(context_injected, role_config=c)
-        agent_opinion = llm.generate_response(
-            prompt=f"Context: {user_input}\nDeliberate on your specific area.\n\n{sequential_context}",
-            system_prompt=final_system_prompt,
-            model=c["model"],
-            temperature=c.get("temperature", 0.7),
-            top_p=c.get("top_p", 0.9),
-            top_k=c.get("top_k", 40),
-            repeat_penalty=c.get("repeat_penalty", 1.1),
-            max_tokens=c.get("max_tokens", 8192),
-            context_window=c.get("context_window", 32768),
-            gpu_layers=c.get("gpu_layers", -1),
-            image_base64=image_base64 if idx == 0 else None,  # Only first agent sees image if provided
-            min_p=c.get("min_p", 0.0),
-            flash_attention=c.get("flash_attention"),
-            cache_type_k=c.get("k_cache_quant"),
-            cache_type_v=c.get("v_cache_quant"),
-            gpu_offload_ratio=c.get("gpu_offload_ratio"),
-            n_parallel=c.get("n_parallel"),
-            reasoning_enabled=c.get("reasoning_enabled"),
-            batch_size=c.get("batch_size"),
-        )
+        if inject_system_context:
+            base_system_prompt = _inject_system_context(base_system_prompt)
+        final_system_prompt = _inject_compass(base_system_prompt, role_config=c)
+        
+        print(f"[AGENT] Loading model: {c['model']} for role: {role_key}")
+        try:
+            agent_opinion = llm.generate_response(
+                prompt=f"Context: {user_input}\nDeliberate on your specific area.\n\n{sequential_context}",
+                system_prompt=final_system_prompt,
+                model=c["model"],
+                temperature=c.get("temperature", 0.7),
+                top_p=c.get("top_p", 0.9),
+                top_k=c.get("top_k", 40),
+                repeat_penalty=c.get("repeat_penalty", 1.1),
+                max_tokens=c.get("max_tokens", 8192),
+                context_window=c.get("context_window", 32768),
+                gpu_layers=c.get("gpu_layers", -1),
+                image_base64=image_base64 if idx == 0 else None,  # Only first agent sees image if provided
+                min_p=c.get("min_p", 0.0),
+                flash_attention=c.get("flash_attention"),
+                cache_type_k=c.get("k_cache_quant"),
+                cache_type_v=c.get("v_cache_quant"),
+                gpu_offload_ratio=c.get("gpu_offload_ratio"),
+                reasoning_enabled=c.get("reasoning_enabled"),
+                batch_size=c.get("batch_size"),
+            )
+            print(f"[AGENT] {role_key} completed deliberation")
+        except Exception as e:
+            print(f"[AGENT] ERROR in {role_key}: {e}")
+            import traceback
+            traceback.print_exc()
+            # Continue to next role - don't fail entire council
+            continue
+            
         parsed_agent = _extract_json(agent_opinion)
         memory.save_opinion(task_id, role_key, c["model"], json.dumps(parsed_agent))
 
         # Update meeting history for next agent
         meeting_history = _format_meeting_history(task_id, memory)
 
-        # Brand Guard Audit
-        bg_config = get_role_config("brand_guard")
-        if bg_config.get("enabled", True):
-            msg_bg = f"[BRAND_GUARD] Brand Guard is auditing {role_key.upper()}..."
-            if progress_callback:
-                progress_callback(msg_bg)
-
-            bg_response = llm.generate_response(
-                prompt=f"Audit this output: {json.dumps(parsed_agent)}",
-                system_prompt=bg_config["system_prompt"],
-                model=bg_config["model"],
-                temperature=bg_config.get("temperature", 0.1),
-                max_tokens=bg_config.get("max_tokens", 512),
-                gpu_layers=bg_config.get("gpu_layers", 0),
-                top_p=bg_config.get("top_p", 0.95),
-                top_k=bg_config.get("top_k", 65),
-                repeat_penalty=bg_config.get("repeat_penalty", 1.1),
-                min_p=bg_config.get("min_p", 0.0),
-                context_window=bg_config.get("context_window", 131072),
-                flash_attention=bg_config.get("flash_attention"),
-                cache_type_k=bg_config.get("k_cache_quant"),
-                cache_type_v=bg_config.get("v_cache_quant"),
-                gpu_offload_ratio=bg_config.get("gpu_offload_ratio"),
-                n_parallel=bg_config.get("n_parallel"),
-                reasoning_enabled=bg_config.get("reasoning_enabled"),
-                batch_size=bg_config.get("batch_size"),
-            )
-            bg_data = _extract_json(bg_response)
-            memory.save_opinion(task_id, f"brand_guard_{role_key}", bg_config["model"], json.dumps(bg_data))
-
-            if not bg_data.get("approved", True):
-                msg_veto = f"[VETO] BRAND VETO on {role_key}: {bg_data.get('reasoning', 'No reason provided')}"
-                print(msg_veto)
+        # Brand Guard Audit — skipped when compass already injected
+        # (compass is injected into every agent's system prompt by
+        # _inject_compass above; brand guard after every agent adds
+        # unnecessary load/unload cycles in the dev pipeline).
+        if brand_guard_enabled:
+            bg_config = get_role_config("brand_guard")
+            if bg_config.get("enabled", True):
+                msg_bg = f"[BRAND_GUARD] Brand Guard is auditing {role_key.upper()}..."
                 if progress_callback:
-                    progress_callback(msg_veto)
-        else:
-            msg_bg_skip = f"[BRAND_GUARD] Audit skipped for {role_key.upper()} (disabled)."
-            print(f"--> {msg_bg_skip}")
-            if progress_callback:
-                progress_callback(msg_bg_skip)
+                    progress_callback(msg_bg)
+
+                bg_response = llm.generate_response(
+                    prompt=f"Audit this output: {json.dumps(parsed_agent)}",
+                    system_prompt=bg_config["system_prompt"],
+                    model=bg_config["model"],
+                    temperature=bg_config.get("temperature", 0.1),
+                    max_tokens=bg_config.get("max_tokens", 512),
+                    gpu_layers=bg_config.get("gpu_layers", 0),
+                    top_p=bg_config.get("top_p", 0.95),
+                    top_k=bg_config.get("top_k", 65),
+                    repeat_penalty=bg_config.get("repeat_penalty", 1.1),
+                    min_p=bg_config.get("min_p", 0.0),
+                    context_window=bg_config.get("context_window", 131072),
+                    flash_attention=bg_config.get("flash_attention"),
+                    cache_type_k=bg_config.get("k_cache_quant"),
+                    cache_type_v=bg_config.get("v_cache_quant"),
+                    gpu_offload_ratio=bg_config.get("gpu_offload_ratio"),
+                    reasoning_enabled=bg_config.get("reasoning_enabled"),
+                    batch_size=bg_config.get("batch_size"),
+                )
+                bg_data = _extract_json(bg_response)
+                memory.save_opinion(task_id, f"brand_guard_{role_key}", bg_config["model"], json.dumps(bg_data))
+
+                if not bg_data.get("approved", True):
+                    msg_veto = f"[VETO] BRAND VETO on {role_key}: {bg_data.get('reasoning', 'No reason provided')}"
+                    print(msg_veto)
+                    if progress_callback:
+                        progress_callback(msg_veto)
+            else:
+                msg_bg_skip = f"[BRAND_GUARD] Audit skipped for {role_key.upper()} (disabled)."
+                print(f"--> {msg_bg_skip}")
+                if progress_callback:
+                    progress_callback(msg_bg_skip)
 
         llm.eject_all_models()
 
@@ -373,10 +404,12 @@ INSTRUCTIONS:
         # bug was a silent-drop: exceptions bubbled up, the caller's
         # finally-block archived the task with status=completed, and
         # oversight_analysis stayed empty with no log line to explain why).
+        print(f"[SYNTHESIS] Loading model: {c['model']} for synthesis role: {synthesis_role}")
         try:
             base_system_prompt = c.get("system_prompt", "")
-            context_injected = _inject_system_context(base_system_prompt)
-            final_system_prompt = _inject_compass(context_injected, role_config=c)
+            if inject_system_context:
+                base_system_prompt = _inject_system_context(base_system_prompt)
+            final_system_prompt = _inject_compass(base_system_prompt, role_config=c)
             final_opinion = llm.generate_response(
                 prompt=f"""Synthesize the meeting history and provide the definitive blueprint.
 
@@ -407,31 +440,33 @@ Output your final blueprint in the specified JSON format for your role.""",
                 cache_type_k=c.get("k_cache_quant"),
                 cache_type_v=c.get("v_cache_quant"),
                 gpu_offload_ratio=c.get("gpu_offload_ratio"),
-                n_parallel=c.get("n_parallel"),
                 reasoning_enabled=c.get("reasoning_enabled"),
                 batch_size=c.get("batch_size"),
             )
+            print(f"[SYNTHESIS] {synthesis_role} completed synthesis")
         except Exception as synth_exc:
             import traceback
+            tb = traceback.format_exc()
             final_opinion = json.dumps({
                 "error": f"Synthesis call raised: {synth_exc!r}",
                 "synthesis_role": synthesis_role,
-                "traceback": traceback.format_exc(limit=4),
+                "traceback": tb,
             })
             err_msg = (
                 f"[SYNTHESIS] ❌ {synthesis_role.upper()} raised "
                 f"{type(synth_exc).__name__}: {synth_exc}"
             )
             print(err_msg)
+            print(tb, file=sys.stderr)
             if progress_callback:
                 progress_callback(err_msg)
-        memory.save_oversight_analysis(task_id, final_opinion)
+        memory.save_oversight_analysis(task_id, final_opinion, system_prompt=final_system_prompt)
     else:
         final_opinion = '{"error": "Synthesis role disabled in config."}'
         print(f"[SYNTHESIS] {synthesis_role.upper()} skipped (disabled).")
         # Persist the disabled state explicitly so it's auditable rather
         # than indistinguishable from a hard-crashed run.
-        memory.save_oversight_analysis(task_id, final_opinion)
+        memory.save_oversight_analysis(task_id, final_opinion, system_prompt="")
 
     # 4. Scribe Synthesis
     msg_scribe = "[SCRIBE] Scribe is generating the master report..."
@@ -456,7 +491,6 @@ Output your final blueprint in the specified JSON format for your role.""",
             cache_type_k=s_config.get("k_cache_quant"),
             cache_type_v=s_config.get("v_cache_quant"),
             gpu_offload_ratio=s_config.get("gpu_offload_ratio"),
-            n_parallel=s_config.get("n_parallel"),
             reasoning_enabled=s_config.get("reasoning_enabled"),
             batch_size=s_config.get("batch_size"),
         )
