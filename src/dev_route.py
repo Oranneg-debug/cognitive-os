@@ -41,6 +41,9 @@ ORIGIN_TO_PREFIX = {
     "systems_architect":  "ARCH",
     "systems architect":  "ARCH",
     "architect":          "ARCH",
+    "spec-kit":           "ARCH",      # GitHub spec-kit specifications
+    "spec_kit":           "ARCH",
+    "spec kit":           "ARCH",
     "data-flow-tracer":   "NLST",
     "data_flow_tracer":   "NLST",
     "data flow tracer":   "NLST",

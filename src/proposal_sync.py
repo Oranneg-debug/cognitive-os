@@ -26,7 +26,11 @@ from typing import Dict, List, Optional, Tuple, Any
 from dataclasses import dataclass, asdict
 
 # Import centralized paths from paths.py
-from src.paths import VAULT_ROOT
+from src.paths import (
+    VAULT_ROOT,
+    COS_VAULT_ROOT,
+    COS_VAULT_PROPOSALS_DIR,
+)
 
 
 # ============================================================================
@@ -36,7 +40,7 @@ from src.paths import VAULT_ROOT
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEV_DIR = PROJECT_ROOT / "dev"
 PROPOSALS_DIR = DEV_DIR / "proposals"
-VAULT_PROPOSALS_DIR = VAULT_ROOT / "1. P - Seedlings" / "dev" / "proposals"
+# COS_VAULT_PROPOSALS_DIR is imported from src.paths — do NOT re-derive here.
 
 SYNC_HISTORY_FILE = DEV_DIR / ".sync_history.json"
 
@@ -136,11 +140,11 @@ class ProposalSyncManager:
         
         Args:
             proposals_dir: Path to backend proposals directory
-            vault_dir: Path to vault proposals directory
+            vault_dir: Path to vault proposals directory (defaults to COS vault)
             history_file: Path to sync history file
         """
         self.proposals_dir = proposals_dir or PROPOSALS_DIR
-        self.vault_dir = vault_dir or VAULT_PROPOSALS_DIR
+        self.vault_dir = vault_dir or COS_VAULT_PROPOSALS_DIR
         self.history_file = history_file or SYNC_HISTORY_FILE
         
         # Ensure directories exist

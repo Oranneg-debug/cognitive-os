@@ -219,8 +219,9 @@ def run_council(
     if progress_callback:
         progress_callback(msg_start)
     
-    llm.eject_all_models()
-    print(f"[COUNCIL] All models ejected, starting council with {len(role_sequence)} roles + synthesis")
+    # Smart loading: let ensure_loaded() handle config mismatches
+    # Only eject if we detect a config mismatch that requires reload
+    print(f"[COUNCIL] Starting council with {len(role_sequence)} roles + synthesis (smart loading enabled)")
     
     # 1. Moderator Framing
     if moderator_enabled:
@@ -499,6 +500,11 @@ Output your final blueprint in the specified JSON format for your role.""",
         print("[SCRIBE] Skipped (disabled).")
 
     memory.complete_task(task_id)
+
+    # Eject all council models (synthesis + scribe) to free VRAM before
+    # the handoff_planner (DeepSeek Coder V2 Lite) loads its own model.
+    llm.eject_all_models()
+    print("[COUNCIL] All models ejected — VRAM freed for handoff_planner")
 
     # A2: Route the synthesis via OutputRouter if injected
     if output_router is not None:

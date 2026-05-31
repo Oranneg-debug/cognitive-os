@@ -11,7 +11,14 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional
 
-from src.paths import VAULT_ROOT, HANDOFFS_DIR
+from src.paths import (
+    VAULT_ROOT,
+    COS_VAULT_ROOT,
+    COS_VAULT_HANDOFFS_DIR,
+    COS_VAULT_PROPOSALS_DIR,
+    COS_VAULT_TEMPLATES_DIR,
+    HANDOFFS_DIR,
+)
 from src.governance_unit_of_work import GovernanceUnitOfWork
 from src.integration_flags import is_governance_uow_enabled
 
@@ -136,7 +143,7 @@ class HandoffWriter:
 
     def __init__(self):
         """Initialize the handoff writer with path constants."""
-        self.vault_handoffs_dir = str(VAULT_ROOT / "1. P - Seedlings" / "dev" / "handoffs")
+        self.vault_handoffs_dir = str(COS_VAULT_HANDOFFS_DIR)
         self.source_handoffs_dir = str(HANDOFFS_DIR)
 
         # Create directories
@@ -171,13 +178,10 @@ class HandoffWriter:
         filename = f"{proposal_id}_BETA_HANDOFF.md"
 
         # ----------------------------------------------------------------
-        # Locate the template
+        # Locate the template (COS vault canonical, Grand Nexus fallback)
         # ----------------------------------------------------------------
         template_paths = [
-            str(
-                VAULT_ROOT / "1. P - Seedlings" / "dev" / "templates" / "beta-handoff-template.md"
-            ),
-            # Fallback: local project copy
+            str(COS_VAULT_TEMPLATES_DIR / "beta-handoff-template.md"),
             str(HANDOFFS_DIR.parent / "templates" / "beta-handoff-template.md"),
         ]
         template = None
@@ -198,10 +202,14 @@ class HandoffWriter:
         def _extract_section(report: str, *headings) -> str:
             """Return the first matching section body, or empty string."""
             for h in headings:
-                pattern = rf'(?:^|\n)#{1,3}\s+{re.escape(h)}[^\n]*\n(.*?)(?=\n#{1,3}\s|\Z)'
+                # Match heading and capture until next same-level or higher heading
+                # This allows sub-headings (###) within a section (##)
+                pattern = rf'(?:^|\n)(#{1,3})\s+{re.escape(h)}[^\n]*\n(.*?)(?=\n\1\s|\n##?\s|\Z)'
                 m = re.search(pattern, report, re.IGNORECASE | re.DOTALL)
                 if m:
-                    return m.group(1).strip()
+                    return m.group(2n, report, re.IGNORECASE | re.DOTALL)
+                if m:
+                    return m.group(2).strip()
             return ""
 
         summary = (
@@ -220,9 +228,9 @@ class HandoffWriter:
         # (reused below in the Beta Testing section append AND passed to
         # the planner so it can read the proposal body)
         # ----------------------------------------------------------------
-        from src.paths import PROPOSALS_DIR
+        from src.paths import PROPOSALS_DIR, COS_VAULT_PROPOSALS_DIR
         proposals_dir = proposals_dir or str(PROPOSALS_DIR)
-        vault_proposals_dir = str(VAULT_ROOT / "1. P - Seedlings" / "dev" / "proposals")
+        vault_proposals_dir = str(COS_VAULT_PROPOSALS_DIR)
 
         proposal_file = None
         for _sd in [vault_proposals_dir, proposals_dir]:
@@ -384,9 +392,7 @@ class HandoffWriter:
         # Locate template (vault first, then source fallback)
         # ----------------------------------------------------------------
         template_paths = [
-            str(
-                VAULT_ROOT / "1. P - Seedlings" / "dev" / "templates" / "alpha-handoff-template.md"
-            ),
+            str(COS_VAULT_TEMPLATES_DIR / "alpha-handoff-template.md"),
             str(HANDOFFS_DIR.parent / "templates" / "alpha-handoff-template.md"),
         ]
         template = None
@@ -444,9 +450,9 @@ class HandoffWriter:
         # ----------------------------------------------------------------
         # Pre-lookup: kanban_card_id and source_note from proposal file
         # ----------------------------------------------------------------
-        from src.paths import PROPOSALS_DIR
+        from src.paths import PROPOSALS_DIR, COS_VAULT_PROPOSALS_DIR
         proposals_dir = proposals_dir or str(PROPOSALS_DIR)
-        vault_proposals_dir = str(VAULT_ROOT / "1. P - Seedlings" / "dev" / "proposals")
+        vault_proposals_dir = str(COS_VAULT_PROPOSALS_DIR)
 
         proposal_file = None
         for _sd in [vault_proposals_dir, proposals_dir]:

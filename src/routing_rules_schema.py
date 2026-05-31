@@ -39,6 +39,11 @@ ALLOWED_DESTINATIONS = frozenset(
         "archives",
         "failed_routings",   # E5 dead-letter
         "vault_mirror",      # vault-bound, but written by proposal_sync NOT router
+        # COS vault destinations (dual-vault architecture)
+        "proposals_vault",
+        "handoffs_vault",
+        "decisions_vault",
+        "releases_vault",
     }
 )
 

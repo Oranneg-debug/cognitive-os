@@ -49,6 +49,45 @@ def _validate_vault_path() -> Path:
     )
 
 
+def _validate_cos_vault_path() -> Path:
+    """
+    Validate the Cognitive OS Vault root path.
+    
+    Precedence:
+        1. COS_VAULT_PATH environment variable
+        2. Fallback: VAULT_ROOT.parent / "Cognitive OS"
+    
+    Raises:
+        RuntimeError: If neither source is valid or both vaults resolve to same directory.
+    
+    Returns:
+        Path: Validated COS vault root directory.
+    """
+    env_path = os.environ.get("COS_VAULT_PATH")
+    if env_path:
+        p = Path(env_path)
+        if p.is_dir():
+            # Collision guard: prevent VAULT_ROOT == COS_VAULT_ROOT
+            if p == VAULT_ROOT:
+                raise RuntimeError(
+                    f"COS_VAULT_PATH ({p}) resolves to same directory as VAULT_ROOT. "
+                    "Dual-vault mode requires two distinct paths."
+                )
+            return p
+    
+    # Fallback: create Cognitive OS folder next to Grand Nexus
+    fallback = VAULT_ROOT.parent / "Cognitive OS"
+    if not fallback.exists():
+        fallback.mkdir(parents=True, exist_ok=True)
+    if fallback.is_dir():
+        return fallback
+    
+    raise RuntimeError(
+        f"Cognitive OS vault path not found. "
+        f"Set COS_VAULT_PATH env var or ensure '{fallback}' exists."
+    )
+
+
 # Validate at import time (fail-fast)
 try:
     VAULT_ROOT = _validate_vault_path()
@@ -56,6 +95,14 @@ except Exception as e:
     raise RuntimeError(
         f"Failed to initialize vault paths: {e}. "
         f"Set OBSIDIAN_VAULT_PATH environment variable to fix."
+    ) from e
+
+try:
+    COS_VAULT_ROOT = _validate_cos_vault_path()
+except Exception as e:
+    raise RuntimeError(
+        f"Failed to initialize COS vault paths: {e}. "
+        f"Set COS_VAULT_PATH environment variable to fix."
     ) from e
 
 
@@ -117,6 +164,80 @@ VAULT_MEMORY_LOGS = VAULT_COUNCIL_OUTPUTS / "memory_logs"
 
 
 # ============================================================================
+# COS VAULT PATHS (Cognitive OS Vault - system artifacts)
+# ============================================================================
+
+# Seedlings folder in COS vault
+COS_VAULT_SEEDLINGS = COS_VAULT_ROOT / "1. P - Seedlings"
+
+# Dev folder in COS vault
+COS_VAULT_DEV = COS_VAULT_SEEDLINGS / "dev"
+
+# Proposals directory (COS vault copy)
+COS_VAULT_PROPOSALS_DIR = COS_VAULT_DEV / "proposals"
+
+# Handoffs directory (COS vault copy)
+COS_VAULT_HANDOFFS_DIR = COS_VAULT_DEV / "handoffs"
+
+# Releases directory (COS vault copy)
+COS_VAULT_RELEASES_DIR = COS_VAULT_DEV / "releases"
+
+# Decisions directory (COS vault copy)
+COS_VAULT_DECISIONS_DIR = COS_VAULT_DEV / "decisions"
+
+# Templates directory in COS vault
+COS_VAULT_TEMPLATES_DIR = COS_VAULT_DEV / "templates"
+
+# AI-Help mirror in COS vault (system-side council outputs)
+COS_VAULT_AI_HELP = COS_VAULT_ROOT / "AI-Help"
+COS_VAULT_COUNCIL_OUTPUTS = COS_VAULT_AI_HELP / "cognitive-os"
+COS_VAULT_MEMORY_LOGS = COS_VAULT_COUNCIL_OUTPUTS / "memory_logs"
+
+
+# ============================================================================
+# UTILITY FUNCTIONS
+# ============================================================================
+
+def _ensure_cos_vault_structure() -> None:
+    """
+    Create required directory structure in COS vault.
+
+    Creates:
+        - AI-Help/cognitive-os/
+        - 1. P - Seedlings/dev/proposals/
+        - 1. P - Seedlings/dev/handoffs/
+        - 1. P - Seedlings/dev/releases/
+        - 1. P - Seedlings/dev/decisions/
+        - 1. P - Seedlings/dev/templates/
+    """
+    dirs = [
+        COS_VAULT_AI_HELP,
+        COS_VAULT_COUNCIL_OUTPUTS,
+        COS_VAULT_MEMORY_LOGS,
+        COS_VAULT_PROPOSALS_DIR,
+        COS_VAULT_HANDOFFS_DIR,
+        COS_VAULT_RELEASES_DIR,
+        COS_VAULT_DECISIONS_DIR,
+        COS_VAULT_TEMPLATES_DIR,
+    ]
+    for d in dirs:
+        d.mkdir(parents=True, exist_ok=True)
+
+
+def cross_vault_link(target_vault_name: str, relative_path: str) -> str:
+    """Generate an obsidian:// URI for cross-vault references.
+
+    Args:
+        target_vault_name: Name of the target Obsidian vault
+        relative_path: File path relative to vault root
+
+    Returns:
+        obsidian:// URI string
+    """
+    return f"obsidian://open?vault={target_vault_name}&file={relative_path}"
+
+
+# ============================================================================
 # ARCHIVE PATHS
 # ============================================================================
 
@@ -134,6 +255,7 @@ REPORTS_DIR = DEV_DIR / "reports"
 __all__ = [
     # Root paths
     "VAULT_ROOT",
+    "COS_VAULT_ROOT",
     "PROJECT_ROOT",
     "SRC_DIR",
     # Project paths
@@ -142,7 +264,7 @@ __all__ = [
     "HANDOFFS_DIR",
     "RELEASES_DIR",
     "CONFIG_DIR",
-    # Vault paths
+    # Grand Nexus vault paths
     "VAULT_SEEDLINGS",
     "VAULT_DEV",
     "VAULT_PROPOSALS_DIR",
@@ -153,6 +275,20 @@ __all__ = [
     "VAULT_AI_HELP",
     "VAULT_COUNCIL_OUTPUTS",
     "VAULT_MEMORY_LOGS",
+    # COS vault paths
+    "COS_VAULT_SEEDLINGS",
+    "COS_VAULT_DEV",
+    "COS_VAULT_PROPOSALS_DIR",
+    "COS_VAULT_HANDOFFS_DIR",
+    "COS_VAULT_RELEASES_DIR",
+    "COS_VAULT_DECISIONS_DIR",
+    "COS_VAULT_TEMPLATES_DIR",
+    "COS_VAULT_AI_HELP",
+    "COS_VAULT_COUNCIL_OUTPUTS",
+    "COS_VAULT_MEMORY_LOGS",
+    # Utility functions
+    "_ensure_cos_vault_structure",
+    "cross_vault_link",
     # Archive paths
     "ARCHIVES_DIR",
     "REPORTS_DIR",

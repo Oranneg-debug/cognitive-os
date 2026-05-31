@@ -50,6 +50,11 @@ from src.paths import (
     PROPOSALS_DIR,
     REPORTS_DIR,
     DEV_DIR,
+    # COS vault paths
+    COS_VAULT_PROPOSALS_DIR,
+    COS_VAULT_HANDOFFS_DIR,
+    COS_VAULT_DECISIONS_DIR,
+    COS_VAULT_RELEASES_DIR,
 )
 
 
@@ -78,6 +83,11 @@ def resolve_destination_path(bucket: str, dead_letter_dir: Path) -> Path:
         "reports": REPORTS_DIR,
         "archives": ARCHIVES_DIR,
         "failed_routings": dead_letter_dir,
+        # System-side vault destinations (COS vault)
+        "proposals_vault": COS_VAULT_PROPOSALS_DIR,
+        "handoffs_vault": COS_VAULT_HANDOFFS_DIR,
+        "decisions_vault": COS_VAULT_DECISIONS_DIR,
+        "releases_vault": COS_VAULT_RELEASES_DIR,
     }
     if bucket not in path_map:
         raise ValueError(f"Unknown destination bucket: {bucket!r}")

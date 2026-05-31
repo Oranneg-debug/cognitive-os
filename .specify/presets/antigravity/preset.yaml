@@ -1,0 +1,131 @@
+# Antigravity Preset for spec-kit
+# Dark Maestro Governance Configuration
+
+name: antigravity
+version: "1.0.0"
+description: "Dark Maestro governance preset for spec-kit specifications"
+
+governance:
+  boardroom:
+    - role: chairman
+      model: "Hermes-4-70b"
+      weight: MAXIMUM
+    - role: strategist  
+      model: "Hermes-4-70b"
+      weight: MEDIUM
+    - role: specialist
+      model: "Qwen3.6-27b-heretic-uncensored"
+      weight: LOW
+    - role: critic
+      model: "DeepSeek-R1-Distill-Qwen-32B"
+      weight: IGNORE
+    - role: creative
+      model: "Hermes-4.3-36B-Heretic"
+      weight: MAXIMUM
+    - role: logical
+      model: "Gemma-4-31B-IT"
+      weight: LOW
+
+  councils:
+    beta:
+      - role: drafting_architect
+        model: "DeepSeek-R1-Distill-Llama-70B"
+      - role: creative_expansionist
+        model: "Hermes-4.3-36B-Heretic"
+      - role: technical_critic
+        model: "DeepSeek-R1-Distill-Qwen-32B"
+      - role: chief_technical_officer
+        model: "Unsloth/Hermes-4-70B"
+
+    alpha:
+      - role: alpha_ux_specialist
+        model: "Qwen3.6-35B-A3B"
+      - role: alpha_perf_specialist
+        model: "Qwen3.6-35B-A3B"
+      - role: alpha_critic
+        model: "DeepSeek-R1-Distill-Qwen-32B"
+      - role: dev_alpha_polish
+        model: "Qwen3.6-27B"
+
+    final-audit:
+      - role: final_scribe
+        model: "deepseek-r1-distill-llama-70B"
+      - role: dev_final_audit
+        model: "deepseek-r1-distill-llama-70B"
+
+  moderation:
+    - role: moderator
+      model: "Qwen3.5-2B"
+    - role: brand_guard
+      model: "Qwen3.5-2B"
+
+phases:
+  - id: proposal
+    name: Proposal Generation
+    models:
+      - DeepSeek-Coder-V2-Lite
+    gates:
+      - type: brand_alignment
+        approver: brand_guard
+      - type: strategic_review
+        approver: chairman
+
+  - id: beta_council_review
+    name: Beta Council Review
+    models:
+      - Qwen3.6-35B
+    gates:
+      - type: technical_feasibility
+        approver: drafting_architect
+      - type: creative_expansion
+        approver: creative_expansionist
+      - type: critical_review
+        approver: technical_critic
+      - type: synthesis
+        approver: chief_technical_officer
+
+  - id: beta_testing
+    name: Beta Testing
+    models:
+      - Qwen3.6-27B
+      - DeepSeek-R1
+    gates:
+      - type: code_quality
+        approver: beta_tester
+
+  - id: alpha_polish
+    name: Alpha Polish (GUI+Perf)
+    models:
+      - Qwen3.6-35B-A3B
+    gates:
+      - type: ui_ux_review
+        approver: alpha_ux_specialist
+      - type: performance_review
+        approver: alpha_perf_specialist
+      - type: security_audit
+        approver: alpha_critic
+
+  - id: final_audit
+    name: Final Audit
+    models:
+      - deepseek-r1-distill-llama-70B
+    gates:
+      - type: acceptance_criteria
+        approver: dev_final_audit
+
+templates:
+  proposal_template: "proposal-template.md"
+  handoff_template: "handoff-template.md"
+  council_report_template: "council-report-template.md"
+
+output:
+  proposals_dir: "cognitive-os/dev/proposals"
+  handoffs_dir: "cognitive-os/dev/handoffs"
+  vault_proposals_dir: "vault/1. P - Seedlings/dev/proposals"
+
+sync:
+  enabled: true
+  direction: backend_to_vault
+  patterns:
+    - "**/*_PROPOSAL.md"
+    - "**/*_HANDDOFF.md"

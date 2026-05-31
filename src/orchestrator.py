@@ -207,7 +207,7 @@ class Orchestrator:
         except Exception as e:
             print(f"   ⚠️ Could not perform startup sync check: {e}")
 
-    def process_request(self, user_input: str, image_base64: str = None, progress_callback=None, compass_weight: str = None, model_presets: list = None, document_base64: str = None, is_pdf: bool = False, source_file_path: str = None):
+    def process_request(self, user_input: str, image_base64: str = None, progress_callback=None, compass_weight: str = None, document_base64: str = None, is_pdf: bool = False, source_file_path: str = None):
         """
         Main entry point for all pattern-based orchestration.
         
@@ -219,7 +219,6 @@ class Orchestrator:
             image_base64: Optional base64-encoded image
             progress_callback: Optional callback for progress updates
             compass_weight: Weight of the Sovereign Compass (DEFAULT/MINIMUM/MAXIMUM/IGNORE)
-            model_presets: Optional list of model presets
             document_base64: Optional base64-encoded PDF document
             is_pdf: Flag indicating if document_base64 contains a PDF
             source_file_path: Optional path to source file

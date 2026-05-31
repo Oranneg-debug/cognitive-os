@@ -2,23 +2,105 @@ import os
 from datetime import datetime
 from pathlib import Path
 
-from src.paths import VAULT_COUNCIL_OUTPUTS, VAULT_MEMORY_LOGS
+from src.paths import (
+    VAULT_COUNCIL_OUTPUTS,
+    VAULT_MEMORY_LOGS,
+    COS_VAULT_COUNCIL_OUTPUTS,
+    COS_VAULT_MEMORY_LOGS,
+)
+
+
+# ============================================================================
+# HELPER FUNCTIONS
+# ============================================================================
+
+
+def pattern_to_council_type(pattern_name: str) -> str:
+    """
+    Map pattern name to council type for routing.
+
+    Args:
+        pattern_name: Pattern name like "DESIGN_MEETING", "SEQUENTIAL_BOARDROOM"
+
+    Returns:
+        "user_side" for Design/Oracle/NFT, "system_side" for others
+    """
+    user_side_patterns = {
+        "DESIGN_MEETING",
+        "ORACLE_COUNCIL",
+        "NFT_CREATION",
+    }
+    if pattern_name in user_side_patterns:
+        return "user_side"
+    return "system_side"  # Default: system councils (Boardroom, Technical, Dev lifecycle)
+
+
+# ============================================================================
+# OBSIDIAN WRITER CLASS
+# ============================================================================
 
 
 class ObsidianWriter:
-    def __init__(self, vault_path: str | Path | None = None):
-        # Default to canonical vault location from paths.py; accept override
-        # as Path or string for backward compatibility.
-        self.vault_path = str(vault_path) if vault_path else str(VAULT_COUNCIL_OUTPUTS)
-        self.memory_path = str(VAULT_MEMORY_LOGS)
+    def __init__(self, vault_path: str | Path | None = None, council_type: str | None = None):
+        """
+        Initialize the ObsidianWriter with appropriate vault destination.
+
+        Args:
+            vault_path: Optional override for vault path
+            council_type: "user_side" or "system_side". If None, defaults to user_side for backward compatibility.
+        """
+        self.council_type = council_type
+        if vault_path:
+            self.vault_path = str(vault_path)
+            # When vault_path is explicitly provided, use Grand Nexus memory logs for backward compatibility
+            self.memory_path = str(VAULT_MEMORY_LOGS)
+        elif council_type == "user_side":
+            self.vault_path = str(VAULT_COUNCIL_OUTPUTS)
+            self.memory_path = str(VAULT_MEMORY_LOGS)
+        else:
+            self.vault_path = str(COS_VAULT_COUNCIL_OUTPUTS)
+            self.memory_path = str(COS_VAULT_MEMORY_LOGS)
         os.makedirs(self.vault_path, exist_ok=True)
         os.makedirs(self.memory_path, exist_ok=True)
-        
-    def write_note(self, title: str, content: str, pattern_used: str, task_id: str, source_file_path: str = None) -> str:
+
+    def write_note(
+        self,
+        title: str,
+        content: str,
+        pattern_used: str,
+        task_id: str,
+        source_file_path: str = None,
+        council_type: str | None = None,
+    ) -> str:
         """
         Writes a generated response to the Obsidian vault with appropriate frontmatter.
         If source_file_path is provided, it adds a backlink to the original document.
+
+        Args:
+            title: Note title
+            content: Note content
+            pattern_used: Pattern name used (e.g., "DESIGN_MEETING")
+            task_id: Task identifier
+            source_file_path: Optional source file path for backlink
+            council_type: "user_side" or "system_side". If None, inferred from pattern_used.
+
+        Returns:
+            Path to the written file, or empty string on failure.
         """
+        # Determine council type (explicit override > instance default > infer from pattern)
+        if council_type is None:
+            council_type = self.council_type
+        if council_type is None:
+            council_type = pattern_to_council_type(pattern_used)
+
+        # Route to appropriate vault based on council type
+        if council_type == "user_side":
+            self.vault_path = str(VAULT_COUNCIL_OUTPUTS)
+            self.memory_path = str(VAULT_MEMORY_LOGS)
+        else:
+            self.vault_path = str(COS_VAULT_COUNCIL_OUTPUTS)
+            self.memory_path = str(COS_VAULT_MEMORY_LOGS)
+
         # Sanitize title for filename
         safe_title = "".join([c for c in title if c.isalpha() or c.isdigit() or c==' ']).rstrip()
         filename = f"{safe_title}.md"

@@ -85,6 +85,7 @@
                     <button class="tab-link" data-tab="lmstudio">LM Studio</button>
                     <button class="tab-link" data-tab="system">System</button>
                     <button class="tab-link" data-tab="devlog">DevLog</button>
+                    <button class="tab-link" data-tab="specs">📦 Specs</button>
                 </div>
                 <div class="config-actions is-hidden">
                     <button id="save-btn" class="save-btn" disabled>Save Configuration</button>
@@ -552,6 +553,66 @@
                     </div>
                     <div id="devlog-output" style="background: var(--bg-darker); border: 1px solid var(--border-color); border-radius: 4px; padding: 15px; min-height: 200px; font-family: monospace; font-size: 13px; white-space: pre-wrap; overflow-y: auto; max-height: 500px;">
                         <em>Click "Generate Draft" to create today's devlog post.</em>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 📦 Specs Tab -->
+            <div id="specs" class="tab-content">
+                <div class="specs-page">
+                    <h2>📦 spec-kit Specs</h2>
+                    <p style="color: var(--text-color); margin-bottom: 16px;">
+                        View active specs, their phases, and linked proposals. Cross-reference with Kanban cards and display gate results.
+                    </p>
+
+                    <div class="specs-controls" style="display: flex; gap: 10px; margin-bottom: 16px; align-items: center;">
+                        <select id="specs-origin-select" style="background: var(--input-bg); border: 1px solid var(--border-color); color: var(--text-color); padding: 6px 12px; border-radius: 4px;">
+                            <option value="all">All Origins</option>
+                            <option value="spec-kit">spec-kit</option>
+                            <option value="internal">Internal</option>
+                        </select>
+                        <button id="specs-refresh-btn" class="system-button" style="background: var(--button-bg); color: var(--button-text); padding: 6px 16px; border: none; border-radius: 4px; cursor: pointer;">
+                            🔄 Refresh
+                        </button>
+                        <button id="specs-generate-btn" class="system-button" style="background: var(--button-bg); color: var(--button-text); padding: 6px 16px; border: none; border-radius: 4px; cursor: pointer;">
+                            📊 Generate Report
+                        </button>
+                    </div>
+
+                    <div id="specs-status-summary" style="display: flex; gap: 16px; margin-bottom: 20px; flex-wrap: wrap;">
+                        <div class="status-card" style="background: var(--bg-darker); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px; min-width: 150px;">
+                            <h4 style="margin: 0 0 8px 0; color: var(--text-color);">Active Specs</h4>
+                            <div id="specs-count-active" class="status-value">0</div>
+                        </div>
+                        <div class="status-card" style="background: var(--bg-darker); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px; min-width: 150px;">
+                            <h4 style="margin: 0 0 8px 0; color: var(--text-color);">In Review</h4>
+                            <div id="specs-count-review" class="status-value">0</div>
+                        </div>
+                        <div class="status-card" style="background: var(--bg-darker); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px; min-width: 150px;">
+                            <h4 style="margin: 0 0 8px 0; color: var(--text-color);">Completed</h4>
+                            <div id="specs-count-completed" class="status-value">0</div>
+                        </div>
+                    </div>
+
+                    <div id="specs-tabs-container" style="display: flex; gap: 4px; margin-bottom: 16px; border-bottom: 2px solid var(--border-color); overflow-x: auto;">
+                        <button class="specs-tab-link active" data-specs-tab="proposal">Proposal</button>
+                        <button class="specs-tab-link" data-specs-tab="beta">Beta</button>
+                        <button class="specs-tab-link" data-specs-tab="alpha">Alpha</button>
+                        <button class="specs-tab-link" data-specs-tab="final">Final</button>
+                    </div>
+
+                    <div id="specs-content" style="background: var(--bg-darker); border: 1px solid var(--border-color); border-radius: 8px; padding: 15px; min-height: 300px;">
+                        <em>Select a phase tab or click "Refresh" to load active specs.</em>
+                    </div>
+
+                    <h3 style="color: var(--text-color); margin-top: 24px;">Gate Results</h3>
+                    <div id="specs-gates-output" style="background: var(--bg-darker); border: 1px solid var(--border-color); border-radius: 8px; padding: 15px; min-height: 150px; font-family: monospace; font-size: 12px; overflow-y: auto;">
+                        <em>Gate results will appear here.</em>
+                    </div>
+
+                    <h3 style="color: var(--text-color); margin-top: 24px;">Linked Kanban Cards</h3>
+                    <div id="specs-kanban-output" style="background: var(--bg-darker); border: 1px solid var(--border-color); border-radius: 8px; padding: 15px; min-height: 150px;">
+                        <em>Linked Kanban cards will appear here.</em>
                     </div>
                 </div>
             </div>

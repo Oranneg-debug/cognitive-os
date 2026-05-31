@@ -16,6 +16,10 @@ import json
 
 from src.paths import (
     VAULT_ROOT,
+    COS_VAULT_ROOT,
+    COS_VAULT_PROPOSALS_DIR,
+    COS_VAULT_RELEASES_DIR,
+    COS_VAULT_TEMPLATES_DIR,
     PROPOSALS_DIR,
     HANDOFFS_DIR,
     RELEASES_DIR,
@@ -43,10 +47,11 @@ class ProposalWriter:
         """Initialize the proposal writer with path constants."""
         self.proposals_dir = str(PROPOSALS_DIR)
         self.releases_dir = str(RELEASES_DIR)
-        self.vault_proposals_dir = str(VAULT_ROOT / "1. P - Seedlings" / "dev" / "proposals")
-        self.vault_releases_dir = str(VAULT_ROOT / "1. P - Seedlings" / "dev" / "releases")
+        # System-side proposals and releases go to COS vault
+        self.vault_proposals_dir = str(COS_VAULT_PROPOSALS_DIR)
+        self.vault_releases_dir = str(COS_VAULT_RELEASES_DIR)
         
-        # Create directories
+        # Create directories (both project and COS vault)
         os.makedirs(self.proposals_dir, exist_ok=True)
         os.makedirs(self.releases_dir, exist_ok=True)
         os.makedirs(self.vault_proposals_dir, exist_ok=True)
@@ -86,10 +91,8 @@ class ProposalWriter:
             if source_file_path else None
         )
 
-        # Load template from Obsidian vault (source of truth for template)
-        vault_template_path = str(
-            VAULT_ROOT / "1. P - Seedlings" / "dev" / "templates" / "proposal-template.md"
-        )
+        # Load template from COS vault (system-side canonical source)
+        vault_template_path = str(COS_VAULT_TEMPLATES_DIR / "proposal-template.md")
 
         if not os.path.exists(vault_template_path):
             raise FileNotFoundError(f"Proposal template not found at {vault_template_path}")

@@ -163,6 +163,21 @@ class ApprovalLogger:
                     nonce,
                     prior_hash
                 ))
+                
+                # Dual-write to approval_log for Gate #3 queries
+                # Map approver to role: technical_meeting/sequential_boardroom → proposal_council
+                role = "proposal_council" if record.approver in ("technical_meeting", "sequential_boardroom") else record.approver
+                cursor.execute("""
+                    INSERT INTO approval_log (proposal_id, role, decision, approver, ts)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (
+                    record.proposal_id,
+                    role,
+                    record.decision,
+                    record.approver,
+                    timestamp
+                ))
+                
                 conn.commit()
             finally:
                 conn.close()

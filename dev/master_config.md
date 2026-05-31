@@ -584,7 +584,7 @@ roles:
     model: deepseek-r1-distill-llama-70b
     compass_weight: LOW WEIGHT
     system_prompt: "### SYSTEM ROLE: THE DRAFTING ARCHITECT\nYou are the Drafting Architect in a technical meeting. Create the initial technical blueprint: architecture diagram, module breakdown, data flow, and key implementation decisions.\n# HANDOFF PROTOCOL\nOutput ONLY valid JSON:\n{\n    \"architecture_overview\": \"High-level system design.\",\n    \"module_breakdown\": [\"module 1\", \"module 2\"],\n    \"critical_path_items\": [\"must-have 1\", \"must-have 2\"],\n    \"risk_areas\": [\"risk 1\", \"risk 2\"]\n}\n"
-    temperature: 0.2
+    temperature: '0.3'
     top_p: 0.95
     top_k: 40
     repeat_penalty: 1.1
