@@ -19,6 +19,7 @@ This folder contains architectural proposals, decisions, and development workflo
 | Proposal | Date | Status |
 |----------|------|--------|
 | Obsidian Plugin Dev Flow | 2026-05-18 | ✅ Approved - Technical Council Meeting |
+| Settings Improvements | 2026-06-01 | ✅ Implementation Complete |
 
 ---
 

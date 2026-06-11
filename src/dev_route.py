@@ -301,7 +301,7 @@ class DevRouteManager:
         req = TransitionRequest(
             proposal_id=proposal_id,
             target_phase=WorkflowPhase.FINALIZED,
-            target_substatus="released",
+            target_substatus="approved",
             approver="system",
             reason="Finalized via dev route",
             version_hash=""  # Final audit bypasses optimistic lock

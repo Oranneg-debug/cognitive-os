@@ -37,8 +37,8 @@ def _validate_vault_path() -> Path:
         if p.is_dir():
             return p
     
-    # Fallback: hardcoded path (Windows-style for current dev environment)
-    fallback = Path(r"E:\Oranneg\CloudStation\Documents\Obsidian\Grand Nexus")
+    # Fallback: hardcoded path (Linux — update to match your vault location)
+    fallback = Path.home() / "Obsidian" / "Grand Nexus"
     if fallback.is_dir():
         return fallback
     

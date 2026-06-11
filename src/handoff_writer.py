@@ -207,8 +207,6 @@ class HandoffWriter:
                 pattern = rf'(?:^|\n)(#{1,3})\s+{re.escape(h)}[^\n]*\n(.*?)(?=\n\1\s|\n##?\s|\Z)'
                 m = re.search(pattern, report, re.IGNORECASE | re.DOTALL)
                 if m:
-                    return m.group(2n, report, re.IGNORECASE | re.DOTALL)
-                if m:
                     return m.group(2).strip()
             return ""
 

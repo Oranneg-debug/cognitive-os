@@ -8,6 +8,7 @@ import os
 import re
 import yaml
 import psutil
+import requests as _requests
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
@@ -16,6 +17,11 @@ from fastapi import FastAPI, Request, HTTPException, BackgroundTasks
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+
+from src.inference_backend import (
+    get_backend as _get_inference_backend,
+    InferenceBackendError,
+)
 
 # Governance Foundation imports (A1, ARCH-2007E0A1)
 from src.output_router import OutputRouter
@@ -218,6 +224,19 @@ async def lifespan(app: FastAPI):
     print("[STARTUP] kanban_store schema ready.")
     print("[STARTUP] Ingesting untracked proposals...")
     await _ingest_untracked_proposals()
+
+    # llama-swap health check — informational only. The backend may be
+    # started separately; we log the status but do NOT block startup.
+    print("[STARTUP] Checking llama-swap backend health...")
+    try:
+        health = await _inference_backend.health_check()
+        if health.healthy:
+            print(f"[STARTUP] llama-swap: {health.message}")
+        else:
+            print(f"[STARTUP] llama-swap NOT reachable (non-fatal): {health.message}")
+    except Exception as exc:
+        print(f"[STARTUP] llama-swap health-check error (non-fatal): {exc!r}")
+
     print("[STARTUP] Booting orchestrator (VRAM flush + sync health check)...")
     orchestrator.boot()
     print("[STARTUP] Orchestrator boot complete.")
@@ -261,23 +280,23 @@ def get_master_config():
 
 @app.get("/api/models")
 def get_available_models():
-    """Queries the local LM Studio server for a live list of installed models."""
+    """Queries the llama-swap backend for a live list of available models."""
+    inference_url = os.getenv('INFERENCE_BASE_URL', 'http://127.0.0.1:1234/v1')
     try:
-        from src.llm_client import llm
-        # Fetch the list of models from LM Studio using the standard OpenAI client
-        models_response = llm.client.models.list()
-        
-        # Extract just the ID strings from the response objects
-        # We also filter out any that might be None or empty just to be safe
-        model_list = [model.id for model in models_response.data if model.id]
-        
+        resp = _requests.get(f"{inference_url}/models", timeout=5)
+        resp.raise_for_status()
+        data = resp.json()
+
+        # Extract just the ID strings from the OpenAI-compatible response
+        model_list = [m["id"] for m in data.get("data", []) if m.get("id")]
+
         # Sort them alphabetically for easier reading in the dropdown
         model_list.sort(key=lambda x: x.lower())
-        
+
         return {"models": model_list}
     except Exception as e:
-        print(f"Error fetching models from LM Studio: {e}")
-        # If LM Studio isn't running, return an empty list rather than crashing the dashboard
+        print(f"Error fetching models from llama-swap: {e}")
+        # If llama-swap isn't running, return an empty list rather than crashing the dashboard
         return {"models": []}
 
 @app.post("/api/config")
@@ -434,9 +453,9 @@ def generate_architecture_diagram():
     end
 
     subgraph "LLM Lifecycle & Inference"
-        LML[LM Studio Loader <br/>lmstudio_loader.py]:::compute
+        LSWAP[llama-swap <br/>inference_backend.py]:::compute
         LLMC[LLM Client <br/>llm_client.py]:::compute
-        LMS((LM Studio <br/>localhost:1234)):::compute
+        LLSRV((llama-server <br/>localhost:1234)):::compute
         GEMINI((Google Gemini <br/>Fallback API)):::compute
     end
 
@@ -448,7 +467,7 @@ def generate_architecture_diagram():
 
     DASH & TG & OBS -->|POST /process, /api/*| API
     
-    SENTRY -.->|Routing Pattern| ORCH
+    SENTRY -..->|Routing Pattern| ORCH
     API --> ORCH
     API --> WF
 
@@ -456,16 +475,16 @@ def generate_architecture_diagram():
     ORCH -->|Durable Records| OBS_W
     OBS_W -->|Markdown Sync| VAULT
 
-    ORCH -->|Load/Unload| LML
-    LML -->|Configure| LMS
+    ORCH -->|Load/Unload| LSWAP
+    LSWAP -->|Manage| LLSRV
     ORCH -->|Execute| LLMC
-    LLMC -->|Inference| LMS
-    LLMC -.->|Fallback| GEMINI"""
+    LLMC -->|Inference| LLSRV
+    LLMC -..->|Fallback| GEMINI"""
     
     desc = """
     <strong>FastAPI Backend</strong>: The central nervous system handling HTTP routing and async tasks.<br/>
     <strong>Sentry Router</strong>: The stateless classification engine picking multi-agent patterns.<br/>
-    <strong>Orchestrator</strong>: The core workflow manager driving agent councils and LM Studio loaders.<br/>
+    <strong>Orchestrator</strong>: The core workflow manager driving agent councils and inference backend.<br/>
     <strong>Kanban Store</strong>: The single-source-of-truth SQLite DB enforcing state transitions and transition gates.
     """
     return {"diagram": diagram, "description": desc}
@@ -547,225 +566,111 @@ def generate_kanban_diagram():
     L -->|Lock Acquired| K[Execute AI Council Roles]
     K -->|Release Lock| M[Update SQLite Substatus & Vault Mirror]"""
     
-    desc = "<strong>Kanban Background Automation:</strong> Dashboard drags trigger FastAPI background tasks. The tasks execute hard transition gates against the filesystem, queue for the global <code>_council_lock</code> (to prevent LM Studio VRAM crashing), execute the generation, and push substatus updates (e.g. <code>execution.coding</code>) back into SQLite."
+    desc = "<strong>Kanban Background Automation:</strong> Dashboard drags trigger FastAPI background tasks. The tasks execute hard transition gates against the filesystem, queue for the global <code>_council_lock</code> (to prevent VRAM conflicts), execute the generation, and push substatus updates (e.g. <code>execution.coding</code>) back into SQLite."
     return {"diagram": diagram, "description": desc}
 
 # ---------------------------------------------------------------------------
-# LM Studio lifecycle endpoints (SDK migration, DEV-20260521-001000-B5D5C0DE)
+# Inference backend lifecycle endpoints (llama-swap migration)
 #
-# All sync SDK calls go through asyncio.to_thread to honour the Chairman's
-# CRITICAL veto: the FastAPI event loop must NEVER block during a ~15s load.
+# All backend calls go through asyncio.to_thread (inside inference_backend)
+# to honour the Chairman's CRITICAL veto: the FastAPI event loop must
+# NEVER block during a model load.
 # ---------------------------------------------------------------------------
+
+# Singleton inference backend instance, used by all lifecycle endpoints.
+_inference_backend = _get_inference_backend(
+    "llama-swap",
+    base_url=os.getenv('INFERENCE_BASE_URL', 'http://127.0.0.1:1234/v1').rsplit('/v1', 1)[0],
+)
+
+# Default directory for GGUF model files.
+_MODELS_DIR = Path(os.getenv('MODELS_DIR', '/mnt/data/AI_Models/models'))
+
+# Default log file for llama-swap output.
+_INFERENCE_LOG_PATH = Path(
+    os.getenv('INFERENCE_LOG_PATH',
+              str(Path(__file__).resolve().parent.parent / 'logs' / 'llama-swap.log'))
+)
 
 BENCH_RESULTS_PATH = os.path.join(
     SCRIPT_DIR, '..', 'scratch', 'bench_hermes_results.jsonl'
 )
 
 
-def _shared_loader():
-    """Return the singleton LMStudioLoader, lazy-initialised."""
-    from src.llm_client import LLMClient
-    return LLMClient._get_loader()
-
-
-class LoadConfigIn(BaseModel):
-    context_length: Optional[int] = None
-    n_parallel: Optional[int] = None
-    flash_attention: Optional[bool] = None
-    cache_type_k: Optional[str] = None
-    cache_type_v: Optional[str] = None
-    # Either a float in [0.0, 1.0] OR the literal strings 'max' / 'off'.
-    # Matches the GpuRatio contract in lmstudio_schema.py.
-    gpu_offload_ratio: Optional[Union[float, str]] = None
-    gpu: Optional[str] = None  # e.g. "max", "auto"
-
-
-class SamplingIn(BaseModel):
-    """Per-model sampling defaults. NOT load-time — these are applied at
-    inference (chat.completions) and persisted to LM Studio's per-model
-    GUI prefs so subsequent JIT-loads pick them up automatically."""
-    temperature: Optional[float] = None
-    top_p: Optional[float] = None
-    top_k: Optional[int] = None
-    min_p: Optional[float] = None
-    repeat_penalty: Optional[float] = None
-    max_tokens: Optional[int] = None
-
-
 class LoadRequest(BaseModel):
+    """Request body for POST /api/load.
+
+    Only ``model_key`` is required. The ``config`` dict is accepted for
+    protocol compatibility but is ignored by llama-swap (model configs
+    live in llama-swap's own config.yaml).
+    """
     model_key: str
     identifier: Optional[str] = None
-    config: Optional[LoadConfigIn] = None
-    sampling: Optional[SamplingIn] = None
-    ttl: Optional[int] = None
-    force_reload: Optional[bool] = False
+    config: Optional[Dict[str, Any]] = None
 
 
 @app.get("/api/loaded")
 async def list_loaded_and_downloaded():
-    """Snapshot of currently loaded + downloaded models from the loader.
+    """Snapshot of currently running + available models from the backend.
 
-    If LM Studio is offline / unreachable, returns empty lists with an
-    ``lm_studio_offline`` flag rather than 500ing — the dashboard's other
-    tabs (kanban, system, etc.) must keep working when LM Studio is down.
+    If llama-swap is offline / unreachable, returns empty lists with a
+    ``backend_offline`` flag rather than 500ing — the dashboard's other
+    tabs (kanban, system, etc.) must keep working when the backend is down.
     """
-    loader = _shared_loader()
-
-    def _snapshot():
-        loaded = []
-        try:
-            instances = loader.list_loaded()
-        except Exception as exc:  # noqa: BLE001 — LM Studio down, etc.
-            print(f"[API /api/loaded] LM Studio unreachable: {exc!r}")
-            return {"loaded": [], "downloaded": [], "lm_studio_offline": True}
-        for inst in instances:
-            entry = {
-                "identifier": inst.identifier,
-                "model_key": inst.model_key,
-            }
-            try:
-                eff = loader.get_effective_config(inst.identifier)
-                if isinstance(eff, dict):
-                    entry["context_length"] = eff.get("contextLength") or eff.get("context_length")
-                    entry["path"] = eff.get("path")
-            except Exception:
-                pass
-            loaded.append(entry)
-        try:
-            downloaded = sorted(d.model_key for d in loader.list_downloaded())
-        except Exception:
-            downloaded = []
-        return {"loaded": loaded, "downloaded": downloaded, "lm_studio_offline": False}
-
-    return await asyncio.to_thread(_snapshot)
-
-
-def _write_sampling_prefs(model_path: str, sampling: dict) -> Optional[str]:
-    """Write sampling defaults into LM Studio's per-model GUI prefs file.
-
-    LM Studio stores per-model overrides at
-        ~/.lmstudio/.internal/user-concrete-model-default-config/<path>.json
-    using dotted keys like 'llm.prediction.temperature'. Writing here means
-    every subsequent JIT-load (including ones triggered by chat.completions
-    without an explicit POST /api/load) picks up these defaults.
-
-    Returns the path written, or None if model_path is empty / write failed.
-    """
-    if not model_path:
-        return None
-    user_profile = os.environ.get("USERPROFILE", "")
-    if not user_profile:
-        return None
-    cfg_root = os.path.join(
-        user_profile, ".lmstudio", ".internal",
-        "user-concrete-model-default-config",
-    )
-    cfg_file = os.path.join(cfg_root, model_path.replace("/", os.sep) + ".json")
-    os.makedirs(os.path.dirname(cfg_file), exist_ok=True)
-
-    # Map our snake_case sampling keys to LM Studio's dotted prefs keys.
-    KEY_MAP = {
-        "temperature":    "llm.prediction.temperature",
-        "top_p":          "llm.prediction.topPSampling",
-        "top_k":          "llm.prediction.topKSampling",
-        "min_p":          "llm.prediction.minPSampling",
-        "repeat_penalty": "llm.prediction.repeatPenalty",
-        "max_tokens":     "llm.prediction.maxPredictedTokens",
-    }
-
-    # Merge with existing file (preserve any load-config fields already there).
-    existing: dict = {"fields": []}
-    if os.path.exists(cfg_file):
-        try:
-            with open(cfg_file, "r", encoding="utf-8") as f:
-                existing = json.load(f) or {"fields": []}
-        except Exception:
-            existing = {"fields": []}
-    fields = existing.get("fields") or []
-    indexed = {f.get("key"): i for i, f in enumerate(fields) if isinstance(f, dict)}
-
-    for skey, dotted in KEY_MAP.items():
-        if skey not in sampling:
-            continue
-        entry = {"key": dotted, "value": sampling[skey]}
-        if dotted in indexed:
-            fields[indexed[dotted]] = entry
-        else:
-            fields.append(entry)
-            indexed[dotted] = len(fields) - 1
-
-    existing["fields"] = fields
     try:
-        with open(cfg_file, "w", encoding="utf-8") as f:
-            json.dump(existing, f, indent=2)
-        return cfg_file
-    except Exception:
-        return None
+        running = await _inference_backend.list_running()
+        loaded = [
+            {"identifier": r.model_key, "model_key": r.model_key}
+            for r in running
+        ]
+    except InferenceBackendError as exc:
+        print(f"[API /api/loaded] llama-swap unreachable: {exc!r}")
+        return {"loaded": [], "downloaded": [], "backend_offline": True}
+
+    # Discover available .gguf models on disk.
+    downloaded: list[str] = []
+    try:
+        if _MODELS_DIR.is_dir():
+            downloaded = sorted(
+                p.stem for p in _MODELS_DIR.rglob("*.gguf") if p.is_file()
+            )
+    except Exception as exc:
+        print(f"[API /api/loaded] model scan failed: {exc!r}")
+
+    return {"loaded": loaded, "downloaded": downloaded, "backend_offline": False}
 
 
 @app.post("/api/load")
 async def load_model(req: LoadRequest):
-    """Load (or reload) a model under the loader. Honours full config schema."""
-    loader = _shared_loader()
-    cfg = (req.config.model_dump(exclude_none=True) if req.config else {})
-    sampling = (req.sampling.model_dump(exclude_none=True) if req.sampling else {})
+    """Load (warm-up) a model via the llama-swap backend.
 
-    def _do_load():
-        # Auto-refresh catalog if the model_key was newly downloaded.
-        try:
-            known = {d.model_key for d in loader.list_downloaded()}
-            if req.model_key not in known:
-                loader.refresh_catalog()
-        except Exception:
-            pass
-        return loader.ensure_loaded(
-            req.model_key,
-            config=cfg,
-            ttl=req.ttl,
-            instance_identifier=req.identifier,
-            force_reload=bool(req.force_reload),
-        )
-
+    Sends a lightweight inference request that triggers llama-swap to
+    start the appropriate llama-server process if it isn't already running.
+    The ``config`` dict is accepted for protocol compatibility but is
+    ignored by llama-swap (model configs live in its own config.yaml).
+    """
     try:
-        result = await asyncio.to_thread(_do_load)
-    except Exception as e:
+        result = await _inference_backend.ensure_model_ready(
+            req.model_key, config=req.config,
+        )
+    except InferenceBackendError as e:
         raise HTTPException(status_code=500, detail=f"load failed: {e!r}")
 
-    # Persist sampling defaults to per-model GUI prefs (best-effort).
-    sampling_written_to = None
-    if sampling:
-        # Resolve the gguf path from the catalog so we write to the right file.
-        try:
-            for d in loader.list_downloaded():
-                if d.model_key == result.model_key:
-                    sampling_written_to = await asyncio.to_thread(
-                        _write_sampling_prefs, d.path, sampling
-                    )
-                    break
-        except Exception:
-            pass
-
     return {
-        "status": "ok",
-        "action": result.action,
-        "identifier": result.identifier,
+        "status": "ok" if result.status == "ready" else result.status,
         "model_key": result.model_key,
-        "duration_s": result.duration_seconds,
-        "config_applied": result.config_applied,
-        "sampling_applied": sampling,
-        "sampling_written_to": sampling_written_to,
+        "message": result.message,
     }
 
 
 @app.delete("/api/load/{identifier}")
 async def unload_model(identifier: str):
-    """Unload a running model by its identifier."""
-    loader = _shared_loader()
+    """Unload a running model by its identifier via llama-swap."""
     try:
-        await asyncio.to_thread(loader.unload, identifier)
-    except Exception as e:
+        was_loaded = await _inference_backend.unload_model(identifier)
+    except InferenceBackendError as e:
         raise HTTPException(status_code=500, detail=f"unload failed: {e!r}")
-    return {"status": "ok", "identifier": identifier}
+    return {"status": "ok", "identifier": identifier, "was_loaded": was_loaded}
 
 
 def _bench_new_model(model_key: str) -> None:
@@ -815,23 +720,41 @@ async def refresh_catalog(
     background_tasks: BackgroundTasks,
     bench_new: bool = False,
 ):
-    """Force the loader to re-scan the LM Studio catalog (after new download).
+    """Re-scan for available models via llama-swap + filesystem.
 
-    When ``bench_new=true`` is passed, any model_keys that are present
-    after the refresh but were not present before get scheduled as a
-    background bench-runner job (A7 of DEV-…-B5D5C0DE). Returns the
-    list of new keys so the dashboard can show "benching now…" badges.
+    Queries llama-swap's ``/v1/models`` for configured models and scans
+    the models directory for ``.gguf`` files. When ``bench_new=true`` is
+    passed, any model_keys that are present after the refresh but were
+    not present before get scheduled as a background bench-runner job.
+    Returns the list of new keys so the dashboard can show
+    "benching now…" badges.
     """
-    loader = _shared_loader()
+    # Snapshot before: models we already knew about.
+    try:
+        before_models = await _inference_backend.list_models()
+        before = {m.model_key for m in before_models}
+    except InferenceBackendError:
+        before = set()
 
-    def _refresh_and_diff() -> tuple[list[str], list[str]]:
-        # Snapshot the existing catalog first so we know what's new.
-        before = set(loader._downloaded_cache.keys()) if loader._downloaded_cache else set()
-        cache = loader.refresh_catalog()  # returns dict[model_key, raw]
-        after = set(cache.keys())
-        return sorted(after), sorted(after - before)
+    # Refresh: re-query llama-swap + scan filesystem.
+    after: set[str] = set()
+    try:
+        refreshed = await _inference_backend.list_models()
+        after.update(m.model_key for m in refreshed)
+    except InferenceBackendError as exc:
+        print(f"[CATALOG] llama-swap query failed: {exc!r}")
 
-    keys, new_keys = await asyncio.to_thread(_refresh_and_diff)
+    # Also scan the filesystem for GGUF files.
+    try:
+        if _MODELS_DIR.is_dir():
+            for p in _MODELS_DIR.rglob("*.gguf"):
+                if p.is_file():
+                    after.add(p.stem)
+    except Exception as exc:
+        print(f"[CATALOG] filesystem scan failed: {exc!r}")
+
+    keys = sorted(after)
+    new_keys = sorted(after - before)
 
     if bench_new:
         for mk in new_keys:
@@ -845,34 +768,24 @@ async def refresh_catalog(
     }
 
 
-@app.get("/api/lmstudio/logs")
-def lmstudio_logs(lines: int = 200, filter: Optional[str] = None):
-    """Tail the most-recently-modified LM Studio server log.
+def _tail_inference_log(lines: int = 200, filter: Optional[str] = None) -> dict:
+    """Tail the llama-swap / inference backend log file.
 
     Args:
         lines:  How many lines from the end to return. Capped at 2000.
         filter: Optional substring filter (case-insensitive). Useful for
-                pulling only "LlamaV4::load", "pipeline parallelism",
+                pulling only "llama_model_load", "pipeline parallelism",
                 "n_seq_max", etc. — the bench-runner SOP's signal patterns.
     """
-    import glob
-
     lines = max(1, min(int(lines), 2000))
 
-    log_dir = os.path.join(
-        os.environ.get("USERPROFILE", ""), ".lmstudio", "server-logs"
-    )
-    if not os.path.isdir(log_dir):
-        return {"file": None, "lines": [], "error": f"log dir not found: {log_dir}"}
+    log_file = _INFERENCE_LOG_PATH
+    if not log_file.exists():
+        return {"file": str(log_file), "lines": [], "error": f"log file not found: {log_file}"}
 
-    candidates = glob.glob(os.path.join(log_dir, "**", "*.log"), recursive=True)
-    if not candidates:
-        return {"file": None, "lines": [], "error": "no .log files found"}
+    file_size = log_file.stat().st_size
 
-    log_file = max(candidates, key=os.path.getmtime)
-    file_size = os.path.getsize(log_file)
-
-    # Read just the last ~lines*200 bytes (rough average line length) to avoid
+    # Read just the last ~lines*250 bytes (rough average line length) to avoid
     # slurping a multi-megabyte log on every poll.
     approx_tail = min(file_size, max(lines * 250, 16_384))
     out: list[str] = []
@@ -887,14 +800,27 @@ def lmstudio_logs(lines: int = 200, filter: Optional[str] = None):
             chunks = [c for c in chunks if needle in c.lower()]
         out = chunks[-lines:]
     except Exception as e:
-        return {"file": log_file, "lines": [], "error": repr(e)}
+        return {"file": str(log_file), "lines": [], "error": repr(e)}
 
     return {
-        "file": log_file,
+        "file": str(log_file),
         "file_size": file_size,
         "returned": len(out),
         "lines": out,
     }
+
+
+@app.get("/api/inference/logs")
+def inference_logs(lines: int = 200, filter: Optional[str] = None):
+    """Tail the llama-swap inference backend log."""
+    return _tail_inference_log(lines=lines, filter=filter)
+
+
+# Backward-compat alias — the dashboard's script.js still hits this path.
+@app.get("/api/lmstudio/logs")
+def lmstudio_logs_compat(lines: int = 200, filter: Optional[str] = None):
+    """Deprecated alias for /api/inference/logs. Kept for backward compat."""
+    return _tail_inference_log(lines=lines, filter=filter)
 
 
 @app.get("/api/benchmarks")
@@ -1529,7 +1455,7 @@ def _sync_substatus_to_proposal(proposal_id: str, substatus: str) -> None:
 # ---------------------------------------------------------------------------
 # Global council lock (2026-05-26)
 # ---------------------------------------------------------------------------
-# LM Studio can only serve one heavy model at a time. All BackgroundTasks
+# llama-swap can only serve one heavy model at a time. All BackgroundTasks
 # that touch the orchestrator (severity dispatcher, beta council, alpha
 # boardroom) MUST hold this lock before calling any orchestrator method.
 # ``_finalize_proposal`` is a pure file-write and doesn't need it.

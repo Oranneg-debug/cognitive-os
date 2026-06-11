@@ -1060,7 +1060,7 @@ header {
 }
 
 /* ===================================================================
- * LM Studio tab — Dark Maestro "Instrument Readout"
+ * Inference Backend tab — Dark Maestro "Instrument Readout"
  * Monochrome on onyx, single gold accent (#c9a227), Iosevka Mono,
  * subtle scanline texture. No widget libraries.
  * =================================================================== */
@@ -1500,7 +1500,7 @@ header {
 .lms-result-panel .lms-ok { color: var(--lms-gold); }
 .lms-result-panel .lms-err { color: #c41e3a; }
 
-/* ---- LM Studio runtime log tail ---- */
+/* ---- llama-swap runtime log tail ---- */
 .lms-card-controls {
     display: flex;
     align-items: center;
@@ -1646,7 +1646,7 @@ header {
     margin-top: 0;
 }
 
-/* Model Defaults Window in LM Studio */
+/* Model Defaults Window in Inference Backend */
 .lms-model-defaults {
     margin-top: 1.5rem;
     padding: 1rem;

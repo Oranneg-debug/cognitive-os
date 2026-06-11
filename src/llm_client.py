@@ -42,33 +42,26 @@ class GeminiClient:
 
 class LLMClient:
     """
-    Wrapper for LM Studio API (OpenAI compatible) and Gemini API.
-    Connects to the local server, typically at http://localhost:1234/v1
+    Wrapper for llama-swap (OpenAI-compatible) and Gemini API.
 
-    Lifecycle (load/unload/config) is delegated to ``LMStudioLoader`` —
-    see DEV-20260521-001000-B5D5C0DE. The previous regime POSTed load
-    configs to a non-existent ``/api/v1/models/load`` endpoint and every
-    setting was silently dropped; the LM Studio JIT auto-loader used GUI
-    prefs instead. Now: load via lmstudio SDK / `lms` CLI, inference via
-    OpenAI client.
+    llama-swap sits in front of one or more llama-server instances and
+    automatically starts / stops the right backend when the OpenAI client
+    sends ``model=<name>``.  Model lifecycle (context size, GPU layers,
+    flash-attention, KV-cache quantisation, …) is configured once in
+    ``llama-swap.yaml`` — callers only need to supply inference-time
+    parameters (temperature, top_p, max_tokens, etc.).
+
+    Default endpoint: http://127.0.0.1:1234/v1
+    Override via INFERENCE_BASE_URL / INFERENCE_API_KEY env vars.
     """
 
-    # Singleton loader instance — shared across all LLMClient calls.
-    # Lazily constructed to avoid importing the SDK at module-init time
-    # (so tools that only need GeminiClient don't pay the import cost).
-    _loader = None
-
-    @classmethod
-    def _get_loader(cls):
-        if cls._loader is None:
-            # Local import: keeps `from src.llm_client import GeminiClient`
-            # working even on hosts where `lmstudio` isn't installed yet.
-            from src.lmstudio_loader import LMStudioLoader, LoaderError  # noqa: F401
-            cls._loader = LMStudioLoader()
-        return cls._loader
-
-    def __init__(self, base_url: str = "http://127.0.0.1:1234/v1", api_key: str = "lm-studio"):
-        # LM Studio acts as a drop-in replacement for OpenAI
+    def __init__(
+        self,
+        base_url: str = None,
+        api_key: str = None,
+    ):
+        base_url = base_url or os.getenv("INFERENCE_BASE_URL", "http://127.0.0.1:1234/v1")
+        api_key = api_key or os.getenv("INFERENCE_API_KEY", "not-needed")
         self.client = OpenAI(base_url=base_url, api_key=api_key)
         self.gemini = GeminiClient()
         
@@ -83,19 +76,19 @@ class LLMClient:
         repeat_penalty: float = 1.1,
         min_p: float = 0.0,
         max_tokens: int = 2048,
-        context_window: int = 8192,
-        gpu_layers: int = -1,
         image_base64: Optional[str] = None,
-        flash_attention: Optional[bool] = None,
-        cache_type_k: Optional[str] = None,
-        cache_type_v: Optional[str] = None,
-        gpu_offload_ratio: Optional[float] = None,
-        batch_size: Optional[int] = None,
         reasoning_enabled: Optional[bool] = None,
         **_extra_load_opts,
     ) -> str:
         """
-        Generate a response using the local LLM or Gemini.
+        Generate a response using the local LLM (via llama-swap) or Gemini.
+
+        llama-swap auto-starts the correct backend when it sees ``model=X``,
+        so there is no explicit load/unload step here.  Loader-specific
+        parameters (context_window, gpu_layers, flash_attention, cache_type_k,
+        cache_type_v, gpu_offload_ratio, batch_size) are accepted via
+        ``**_extra_load_opts`` for backward compatibility but are silently
+        ignored — those settings live in llama-swap.yaml now.
         """
         # Route to Gemini if requested
         if model.lower().startswith("gemini"):
@@ -123,71 +116,17 @@ class LLMClient:
         else:
             messages.append({"role": "user", "content": prompt})
         
-        # 1. Delegate load lifecycle to the LMStudioLoader.
-        #    The OpenAI client below STILL handles inference — we only
-        #    use the loader to (re)load the model with the right config.
-        #    See DEV-20260521-001000-B5D5C0DE for the migration rationale.
-        try:
-            loader = self._get_loader()
-            # Build the loader-shaped config dict from the kwargs we have.
-            # ``normalize_config`` (inside the loader) will canonicalize
-            # aliases and reject unknown keys loudly.
-            load_cfg: dict = {}
-            if context_window:
-                load_cfg["context_length"] = context_window
-            if flash_attention is not None:
-                # Accept 'true'/'false' strings (dashboard select) and booleans
-                if isinstance(flash_attention, str):
-                    load_cfg["flash_attention"] = flash_attention.lower() == 'true'
-                else:
-                    load_cfg["flash_attention"] = bool(flash_attention)
-            if cache_type_k is not None:
-                load_cfg["llama_k_cache_quantization_type"] = cache_type_k
-            if cache_type_v is not None:
-                load_cfg["llama_v_cache_quantization_type"] = cache_type_v
-            # GPU offload — preserve the historical semantics:
-            #   gpu_offload_ratio explicit  -> use it (float or "max")
-            #   gpu_layers == -1            -> "max"
-            #   otherwise                   -> no override (use GUI prefs)
-            if gpu_offload_ratio is not None:
-                load_cfg["gpu"] = {"ratio": gpu_offload_ratio}
-            elif gpu_layers == -1:
-                load_cfg["gpu"] = {"ratio": "max"}
-            # Prompt eval batch size — maps to llama.cpp eval_batch_size.
-            if batch_size is not None:
-                load_cfg["batch_size"] = int(batch_size)
+        # Log any ignored loader opts (once, at debug level) so devs can
+        # tell if stale config keys are being passed from master_config.
+        if _extra_load_opts:
+            ignored = ", ".join(sorted(_extra_load_opts.keys()))
+            print(f"[llm_client] Ignored loader-only opts (handled by llama-swap.yaml): {ignored}")
 
-            result = loader.ensure_loaded(
-                model,
-                config=load_cfg or None,
-                instance_identifier=model,  # match OpenAI client's `model` arg
-                ttl=None,                   # no auto-unload during a council
-            )
-            kv_note = ""
-            if cache_type_k or cache_type_v or flash_attention is not None:
-                kv_note = (
-                    f" | FA={flash_attention} "
-                    f"K={cache_type_k or 'f16'} V={cache_type_v or 'f16'}"
-                )
-            print(
-                f"[LOADED] {result.action}: {result.identifier} "
-                f"(Context: {context_window}, "
-                f"GPU: {gpu_layers if gpu_layers != -1 else 'max'}"
-                f"{kv_note}, {result.duration_seconds:.2f}s)"
-            )
-
-        except Exception as e:
-            # Loader failures are NOT fatal here — the OpenAI client will
-            # still attempt inference, and LM Studio will JIT-load using
-            # its GUI prefs as a fallback. Log loudly so the failure is
-            # visible (the previous regime silently dropped these errors).
-            print(f"[WARNING] Loader delegation failed for {model!r}: {e!r}")
-            print(f"[WARNING] Falling back to LM Studio JIT auto-load (GUI prefs).")
-
-        # 2. Execute the inference request (execution metrics only)
+        # Execute the inference request — llama-swap routes to the right
+        # backend automatically based on the model name.
         try:
             print("-" * 60)
-            print(f"🚀 Calling LM Studio with model: {model}")
+            print(f"🚀 Calling llama-swap with model: {model}")
             print("  INFERENCE PARAMS:")
             print(f"    - temperature: {temperature}")
             print(f"    - top_p: {top_p}")
@@ -220,33 +159,36 @@ class LLMClient:
             
     def eject_all_models(self, force_all: bool = False):
         """
-        Unload all currently loaded models from LM Studio to free VRAM.
-        Uses LM Studio's specific /api/v1/models/unload endpoint.
+        Unload all currently loaded models from llama-swap to free VRAM.
+        Uses llama-swap's ``POST /unload`` endpoint which stops the
+        currently running llama-server backend.
         
         Args:
             force_all: If True, bypasses the shield and unloads embedding models as well.
         """
         try:
-            # Get list of currently loaded models via OpenAI standard endpoint
-            loaded_models = self.client.models.list()
-            
+            # Derive the host URL from the OpenAI client's base_url
+            # (e.g. http://127.0.0.1:1234/v1 -> http://127.0.0.1:1234)
             host_url = f"{self.client.base_url.scheme}://{self.client.base_url.host}:{self.client.base_url.port}"
-            unload_url = f"{host_url}/api/v1/models/unload"
-            
-            for model in loaded_models.data:
-                model_id = model.id
-                
-                # Protect embedding models from being unloaded so RAG stays functional
-                # UNLESS force_all is True (e.g., during startup flush)
-                if not force_all and "embed" in model_id.lower():
-                    print(f"[SHIELD] Skipping unload of embedder model: {model_id}")
-                    continue
-                    
-                requests.post(unload_url, json={"instance_id": model_id}, timeout=5)
-                print(f"[UNLOADED] Unloaded model: {model_id}")
+
+            if not force_all:
+                # Check loaded models first so we can shield embedding models
+                try:
+                    loaded_models = self.client.models.list()
+                    for m in loaded_models.data:
+                        if "embed" in m.id.lower():
+                            print(f"[SHIELD] Embedding model loaded ({m.id}) — skipping unload to protect RAG")
+                            return
+                except Exception:
+                    pass  # If we can't list models, proceed with unload anyway
+
+            unload_url = f"{host_url}/api/models/unload"
+            resp = requests.post(unload_url, timeout=10)
+            resp.raise_for_status()
+            print(f"[UNLOADED] llama-swap models unloaded (status {resp.status_code})")
                 
         except Exception as e:
-            print(f"[WARNING] Could not eject models: {e}")
+            print(f"[WARNING] Could not eject models via llama-swap: {e}")
 
 # Singleton instance for easy import
 llm = LLMClient()
@@ -265,25 +207,11 @@ def flush_vram(force_all: bool = False) -> None:
 
 def restore_default_role() -> None:
     """
-    Top-level function to restore the default role configuration via LM Studio CLI.
-    Uses subprocess.Popen with shell=True for fire-and-forget behavior.
-    This is the extracted _restore_default_state from orchestrator.py.
+    No-op under llama-swap.
+
+    Under LM Studio this restored the default profile via ``lms profile
+    apply default``.  With llama-swap the baseline model is managed by
+    TTL-based auto-unload and preload hooks in llama-swap.yaml — there
+    is no profile state to restore.
     """
-    import subprocess
-    import os
-    
-    # Use the lms CLI to restore the default profile
-    command = 'lms profile apply default'
-    
-    try:
-        print(f"[RESTORE_ROLE] Executing: {command}")
-        subprocess.Popen(
-            command,
-            shell=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            stdin=subprocess.DEVNULL
-        )
-        print("[RESTORE_ROLE] Restore command dispatched (fire-and-forget).")
-    except Exception as e:
-        print(f"[RESTORE_ROLE] Failed to dispatch restore command: {e}")
+    print("[RESTORE_ROLE] No-op: llama-swap manages model lifecycle via TTL and preload hooks.")

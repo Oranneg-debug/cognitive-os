@@ -303,7 +303,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const modelsData = await modelsResponse.json();
                 availableModels = modelsData.models || [];
             } else {
-                console.warn("Could not load live models from LM Studio.");
+                console.warn("Could not load live models from llama-swap.");
             }
 
             populateSidebar();
@@ -489,8 +489,8 @@ document.addEventListener('DOMContentLoaded', () => {
             // Use the live availableModels if we have them, otherwise fall back to whatever is in the config
             let modelOptions = availableModels.length > 0 ? availableModels : Object.keys(fullConfig.models || {});
             
-            // Ensure the currently selected model is always in the list, even if LM Studio doesn't report it
-            // (e.g., if LM Studio is closed but the config has a saved model)
+            // Ensure the currently selected model is always in the list, even if llama-swap doesn't report it
+            // (e.g., if llama-swap is not running but the config has a saved model)
             if (data.model && !modelOptions.includes(data.model)) {
                 modelOptions = [data.model, ...modelOptions];
             }
@@ -525,7 +525,7 @@ document.addEventListener('DOMContentLoaded', () => {
         let layersHint = 'Use -1 for maximum GPU offload';
         
         if (type === 'role' && data.model) {
-            // Check if this model is loaded in LM Studio
+            // Check if this model is loaded in the inference backend
             fetch('/api/loaded').then(async response => {
                 if (response.ok) {
                     const loadedData = await response.json();
@@ -533,14 +533,14 @@ document.addEventListener('DOMContentLoaded', () => {
                     const modelInfo = loaded.find(m => m.model_key === data.model);
                     
                     if (modelInfo) {
-                        // Update hints with actual values from LM Studio
+                        // Update hints with actual values from the inference backend
                         if (modelInfo.context_length) {
                             const ctxInput = document.getElementById('config-context_window');
                             if (ctxInput && ctxInput.nextElementSibling) {
                                 const helpText = ctxInput.parentElement.querySelector('.form-help') || 
                                                document.createElement('small');
                                 helpText.className = 'form-help';
-                                helpText.textContent = `LM Studio reports: ${modelInfo.context_length}`;
+                                helpText.textContent = `Backend reports: ${modelInfo.context_length}`;
                                 helpText.style.color = 'var(--success-color)';
                                 if (!ctxInput.parentElement.querySelector('.form-help')) {
                                     ctxInput.parentElement.appendChild(helpText);
@@ -1064,7 +1064,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        // LM Studio tab: refresh loaded + catalog + benches on open
+        // Inference tab: refresh loaded + catalog + benches on open
         if (tabName === 'lmstudio') {
             lmstudio.activate();
             return;
@@ -1085,7 +1085,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
 
-        // Any other tab: stop the LM Studio log poller
+        // Any other tab: stop the inference log poller
         lmstudio.deactivate();
     }
     
@@ -1734,11 +1734,11 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // =========================================================================
-    // LM Studio control module
+    // Inference backend control module (llama-swap)
     // -------------------------------------------------------------------------
-    // Wires the LM Studio tab: Console (loaded models, load form, result panel)
+    // Wires the Inference tab: Console (loaded models, load form, result panel)
     // and Benchmarks (JSONL history + detail panel). Talks to the API on
-    // localhost:5000, never to LM Studio directly.
+    // localhost:5000, never to llama-swap directly.
     // =========================================================================
     const lmstudio = (() => {
         const $ = (id) => document.getElementById(id);
@@ -2075,7 +2075,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         // ---------------------------------------------------------------
-        // LM Studio runtime log tail (right side of Console).
+        // Inference backend runtime log tail (right side of Console).
         // ---------------------------------------------------------------
         let logPollHandle = null;
 
@@ -2125,7 +2125,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const qs = new URLSearchParams({ lines: '180' });
             if (filter) qs.set('filter', filter);
             try {
-                const r = await fetch(`/api/lmstudio/logs?${qs}`);
+                const r = await fetch(`/api/inference/logs?${qs}`);
                 if (!r.ok) throw new Error(`HTTP ${r.status}`);
                 const data = await r.json();
                 if (data.error) {
@@ -2184,7 +2184,7 @@ document.addEventListener('DOMContentLoaded', () => {
         return {
             activate() {
                 if (!activated) { bind(); activated = true; }
-                // Always refresh on open so reloads in LM Studio reflect immediately
+                // Always refresh on open so reloads in the backend reflect immediately
                 refreshLoaded();
                 refreshBenchmarks();
                 // Kick off the log poller if "follow" is on (it is by default)

@@ -2,7 +2,7 @@
 :: Navigate to the project directory
 cd /d "E:\Antigravity\cognitive-os"
 
-:: Start a background task to load the embedder and a default LLM after a short delay (gives the server time to start).
+:: :: Start a background task to load the embedder and a default LLM after a short delay (gives the server time to start).
 ::
 :: ministral-3-3b is used as moderator AND scribe AND brand-guard companion in the
 :: boardroom council. The scribe receives the full deliberation transcript (~10-14K
@@ -15,7 +15,10 @@ cd /d "E:\Antigravity\cognitive-os"
 ::             trivial RAM cost)
 :: --gpu off : pin to CPU per the VRAM-policy agreement (moderator/scribe/brand-guards
 ::             must not eat VRAM that 70B reviewers need)
-start /B "" cmd /c "timeout /t 10 /nobreak >nul && echo Loading embedder on CPU... && lms load text-embedding-bge-m3 --gpu off -y && echo Loading default LLM at 32K ctx on CPU... && lms load ministral-3-3b-instruct-2512 -c 32768 --gpu off -y"
+::
+:: NOTE (2026-06-03): Commented out for Unsloth Studio migration, since Unsloth model
+:: loading is performed manually via the Unsloth Studio UI.
+:: start /B "" cmd /c "timeout /t 10 /nobreak >nul && echo Loading embedder on CPU... && lms load text-embedding-bge-m3 --gpu off -y && echo Loading default LLM at 32K ctx on CPU... && lms load ministral-3-3b-instruct-2512 -c 32768 --gpu off -y"
 
 :: Defensive cleanup: kill any existing FastAPI process on port 5000.
 :: Without this, re-running start_services.bat hits [Errno 10048] because
@@ -38,7 +41,7 @@ for /f "tokens=5" %%P in ('netstat -ano ^| findstr ":5000.*LISTENING"') do (
 ::     TypeScript. Re-add manually for plugin work; the production
 ::     services don't need them running.
 ::
-:: The Ollama Bridge translates Ollama protocol -> LM Studio OpenAI server so
+:: The Ollama Bridge translates Ollama protocol -> Unsloth Studio OpenAI server so
 :: VS Code's BYOK "Ollama" provider can target the local model catalog.
-:: It must start AFTER lms server (which it proxies to), so it's last in the chain.
-wt -d "E:\Antigravity\cognitive-os" cmd /k "title LM Studio Server && lms server start --cors --bind 0.0.0.0" ; new-tab -d "E:\Antigravity\cognitive-os" cmd /k "title FastAPI Server && set PYTHONIOENCODING=utf-8 && python -m src.api" ; new-tab -d "E:\Antigravity\cognitive-os" cmd /k "title Telegram Server && set PYTHONIOENCODING=utf-8 && python -m src.telegram_bot" ; new-tab -d "E:\Antigravity\cognitive-os" cmd /k "title Ollama Bridge (LM Studio -> VS Code BYOK) && set PYTHONIOENCODING=utf-8 && timeout /t 8 /nobreak >nul && python scratch/lms_ollama_bridge.py"
+:: It must start AFTER Unsloth Studio (which it proxies to), so it's last in the chain.
+wt -d "E:\Antigravity\cognitive-os" cmd /k "title Unsloth Studio && unsloth studio" ; new-tab -d "E:\Antigravity\cognitive-os" cmd /k "title FastAPI Server && set PYTHONIOENCODING=utf-8 && python -m src.api" ; new-tab -d "E:\Antigravity\cognitive-os" cmd /k "title Telegram Server && set PYTHONIOENCODING=utf-8 && python -m src.telegram_bot" ; new-tab -d "E:\Antigravity\cognitive-os" cmd /k "title Ollama Bridge (Unsloth Studio -> VS Code BYOK) && set PYTHONIOENCODING=utf-8 && timeout /t 8 /nobreak >nul && python scratch/unsloth_ollama_bridge.py"

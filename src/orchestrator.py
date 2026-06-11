@@ -9,8 +9,8 @@ import re
 import yaml
 
 # Force UTF-8 on stdout/stderr so emoji-heavy log lines don't blow up under
-# Windows PowerShell's default cp1252 codec (Python 3.14 + LM Studio combo).
-# `errors='replace'` keeps a stray glyph from ever masking a real exception.
+# non-UTF-8 locales. `errors='replace'` keeps a stray glyph from ever masking
+# a real exception.
 for _stream in (sys.stdout, sys.stderr):
     reconfigure = getattr(_stream, "reconfigure", None)
     if reconfigure is not None:
@@ -163,7 +163,7 @@ class Orchestrator:
         try:
             llm.eject_all_models(force_all=True)
         except Exception as e:
-            print(f"⚠️ Startup flush failed (LM Studio might not be fully ready yet): {e}")
+            print(f"⚠️ Startup flush failed (llama-swap might not be running yet): {e}")
 
         # Perform startup sync health check
         self._perform_startup_sync_check()

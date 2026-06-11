@@ -1,0 +1,299 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/mostlygeek/llama-swap/refs/heads/main/config-schema.json
+
+# =============================================================================
+# Cognitive OS — llama-swap configuration
+# =============================================================================
+# Replaces LM Studio (Windows) with llama-swap + llama-server (Debian Linux).
+# Dual RTX 3090 (2×24 GB VRAM). Models at /mnt/data/AI_Models/models/.
+#
+# Model identifiers here MUST match the `model:` strings in
+#   cognitive-os/dev/master_config.md
+#
+# Start with:  llama-swap --config config/llama-swap.yaml --listen :1234
+# =============================================================================
+
+# Global settings
+healthCheckTimeout: 120
+logLevel: info
+startPort: 10001
+sendLoadingState: true
+
+# Macros — reusable command-line fragments
+macros:
+  llama-bin: /home/gennaro/llama.cpp/build/bin/llama-server
+  models-dir: /mnt/data/AI_Models/models
+
+# Groups — GPU resource management
+groups:
+  gpu-exclusive:
+    swap: true
+    exclusive: true
+    members:
+      # 70 B class — only ONE can be loaded at a time
+      - deepseek-r1-distill-llama-70b
+      - hermes-4-70b
+      - unsloth/hermes-4-70b
+      # 27–36 B class
+      - qwen3.6-27b-heretic-uncensored-finetune-neo-code-di-imatrix-max
+      - hermes-4.3-36b-heretic-i1
+      - qwen3.6-35b-a3b-uncensored-hauhaucs-aggressive
+      - qwen3.5-35b-a3b-uncensored-hauhaucs-aggressive
+      # Large coders
+      - qwen3-coder-next
+
+# Hooks — preload models on startup
+# NOTE: Preload disabled — llama-swap crashes if preload fails.
+# The embeddings model will load on first request instead.
+# hooks:
+#   on_startup:
+#     preload:
+#       - bge-m3-embedding
+
+# =========================================================================
+# Models
+# =========================================================================
+models:
+
+  # Embeddings — BGE-M3 (always loaded)
+  bge-m3-embedding:
+    cmd: |
+      ${llama-bin}
+      --port ${PORT}
+      --model ${models-dir}/bge-m3-Q8_0.gguf
+      --embedding
+      --ctx-size 8192
+      --batch-size 4096
+      --n-gpu-layers 99
+      --flash-attn on
+    ttl: 0
+
+  # 3 B — Ministral (scribe, final_scribe, devlog_scribe)
+  ministral-3-3b-instruct-2512:
+    cmd: |
+      ${llama-bin}
+      --port ${PORT}
+      --model ${models-dir}/Ministral-3-3B-Instruct-2512-UD-Q4_K_XL.gguf
+      --ctx-size 65536
+      --batch-size 4096
+      --n-gpu-layers 99
+      --flash-attn on
+    ttl: 300
+
+  # 2 B — "simple" & "moderator" roles
+  # NOTE: qwen3.5-2b GGUF not on disk. Using 9b as substitute.
+  qwen3.5-2b:
+    cmd: |
+      ${llama-bin}
+      --port ${PORT}
+      --model ${models-dir}/qwen3.5-9b-Q4_K_M.gguf
+      --ctx-size 131072
+      --batch-size 2048
+      --n-gpu-layers 99
+      --flash-attn on
+    ttl: 300
+
+  # 9 B — "standard" role
+  qwen3.5-9b-claude-4.6-highiq-instruct-heretic-uncensored:
+    cmd: |
+      ${llama-bin}
+      --port ${PORT}
+      --model ${models-dir}/qwen3.5-9b-Q4_K_M.gguf
+      --ctx-size 131072
+      --batch-size 4096
+      --n-gpu-layers 99
+      --flash-attn on
+    ttl: 300
+
+  # 9 B — GLM-4 Flash (design_junior, alpha_ux_specialist)
+  zai-org/glm-4.6v-flash:
+    cmd: |
+      ${llama-bin}
+      --port ${PORT}
+      --model ${models-dir}/GLM-4.7-Flash-Q6_K.gguf
+      --ctx-size 65536
+      --batch-size 4096
+      --n-gpu-layers 99
+      --flash-attn on
+    ttl: 300
+
+  # Vision — Qwen3-VL-2B
+  qwen3-vl-4b-thinking:
+    cmd: |
+      ${llama-bin}
+      --port ${PORT}
+      --model ${models-dir}/lmstudio-community/Qwen3-VL-2B-Instruct-GGUF/Qwen3-VL-2B-Instruct-Q4_K_M.gguf
+      --ctx-size 32768
+      --batch-size 4096
+      --n-gpu-layers 99
+      --flash-attn on
+    ttl: 300
+
+  # 4 B — Brand guard (gemma-4-E4B uncensored)
+  gemma-4-e4b-uncensored-hauhaucs-aggressive:
+    cmd: |
+      ${llama-bin}
+      --port ${PORT}
+      --model ${models-dir}/mradermacher/gemma-4-E4B-it-ultra-uncensored-heretic-GGUF/gemma-4-E4B-it-ultra-uncensored-heretic.Q4_K_M.gguf
+      --ctx-size 65536
+      --batch-size 2048
+      --n-gpu-layers 99
+      --flash-attn on
+    ttl: 300
+
+  # 27 B — Qwen3.6-27B (specialist, design_senior, alpha_polish, oracle_member_1)
+  qwen3.6-27b-heretic-uncensored-finetune-neo-code-di-imatrix-max:
+    cmd: |
+      ${llama-bin}
+      --port ${PORT}
+      --model ${models-dir}/unsloth/Qwen3.6-27B-MTP-GGUF/Qwen3.6-27B-IQ4_NL.gguf
+      --ctx-size 32768
+      --batch-size 4096
+      --n-gpu-layers 99
+      --flash-attn on
+      --cache-type-k q8_0
+      --cache-type-v q8_0
+    ttl: 120
+
+  # 35 B MoE — dev_beta_council role
+  qwen3.6-35b-a3b-uncensored-hauhaucs-aggressive:
+    cmd: |
+      ${llama-bin}
+      --port ${PORT}
+      --model ${models-dir}/unsloth/Qwen3.6-35B-A3B-GGUF/Qwen3.6-35B-A3B-MXFP4_MOE.gguf
+      --ctx-size 16384
+      --batch-size 4096
+      --n-gpu-layers 99
+      --flash-attn on
+      --cache-type-k q8_0
+      --cache-type-v q8_0
+    ttl: 120
+
+  # Older 3.5 35B-A3B reference (same underlying model)
+  qwen3.5-35b-a3b-uncensored-hauhaucs-aggressive:
+    cmd: |
+      ${llama-bin}
+      --port ${PORT}
+      --model ${models-dir}/unsloth/Qwen3.6-35B-A3B-GGUF/Qwen3.6-35B-A3B-MXFP4_MOE.gguf
+      --ctx-size 98304
+      --batch-size 4096
+      --n-gpu-layers 99
+      --flash-attn on
+      --cache-type-k q8_0
+      --cache-type-v q8_0
+    ttl: 120
+
+  # 36 B — Hermes 4.3 (creative roles)
+  hermes-4.3-36b-heretic-i1:
+    cmd: |
+      ${llama-bin}
+      --port ${PORT}
+      --model ${models-dir}/NousResearch_Hermes-4.3-36B-IQ4_NL.gguf
+      --ctx-size 65536
+      --batch-size 4096
+      --n-gpu-layers 99
+      --flash-attn on
+      --cache-type-k q8_0
+      --cache-type-v q8_0
+    ttl: 120
+
+  # Coder — Qwen3-Coder-Next (alpha_perf_specialist, handoff_planner)
+  qwen3-coder-next:
+    cmd: |
+      ${llama-bin}
+      --port ${PORT}
+      --model ${models-dir}/Qwen3-Coder-Next-UD-IQ4_NL.gguf
+      --ctx-size 65536
+      --batch-size 4096
+      --n-gpu-layers 99
+      --flash-attn on
+      --cache-type-k q8_0
+      --cache-type-v q8_0
+    ttl: 120
+
+  # Coder alias (handoff_planner references this name)
+  deepseek-coder-v2-lite-instruct:
+    cmd: |
+      ${llama-bin}
+      --port ${PORT}
+      --model ${models-dir}/Qwen3-Coder-Next-UD-IQ4_NL.gguf
+      --ctx-size 32768
+      --batch-size 4096
+      --n-gpu-layers 99
+      --flash-attn on
+      --cache-type-k q8_0
+      --cache-type-v q8_0
+    ttl: 120
+
+  # 70 B — DeepSeek-R1-Distill-Llama-70B (strategist, architect, final audit)
+  deepseek-r1-distill-llama-70b:
+    cmd: |
+      ${llama-bin}
+      --port ${PORT}
+      --model ${models-dir}/unsloth/DeepSeek-R1-Distill-Llama-70B-GGUF/DeepSeek-R1-Distill-Llama-70B-IQ4_NL.gguf
+      --ctx-size 32768
+      --batch-size 2048
+      --n-gpu-layers 99
+      --flash-attn on
+      --cache-type-k q8_0
+      --cache-type-v q8_0
+      --tensor-split 0.5,0.5
+    ttl: 60
+
+  # 70 B — Hermes-4-70B (chairman, oracle_judge)
+  hermes-4-70b:
+    cmd: |
+      ${llama-bin}
+      --port ${PORT}
+      --model ${models-dir}/Hermes-4-70B-IQ4_NL.gguf
+      --ctx-size 48000
+      --batch-size 2048
+      --n-gpu-layers 99
+      --flash-attn on
+      --cache-type-k q8_0
+      --cache-type-v q8_0
+      --tensor-split 0.5,0.5
+    ttl: 60
+
+  # 70 B alias (chief_technical_officer role)
+  unsloth/hermes-4-70b:
+    cmd: |
+      ${llama-bin}
+      --port ${PORT}
+      --model ${models-dir}/Hermes-4-70B-IQ4_NL.gguf
+      --ctx-size 32768
+      --batch-size 2048
+      --n-gpu-layers 99
+      --flash-attn on
+      --cache-type-k q8_0
+      --cache-type-v q8_0
+      --tensor-split 0.5,0.5
+    ttl: 60
+
+  # =========================================================================
+  # PLACEHOLDERS — uncomment when GGUFs are downloaded
+  # =========================================================================
+  # deepseek-r1-distill-qwen-32b-uncensored:
+  #   cmd: |
+  #     ${llama-bin}
+  #     --port ${PORT}
+  #     --model ${models-dir}/deepseek-r1-distill-qwen-32b-uncensored.gguf
+  #     --ctx-size 65536
+  #     --batch-size 4096
+  #     --n-gpu-layers 99
+  #     --flash-attn on
+  #     --cache-type-k q8_0
+  #     --cache-type-v q8_0
+  #   ttl: 120
+  #
+  # gemma-4-31b-it:
+  #   cmd: |
+  #     ${llama-bin}
+  #     --port ${PORT}
+  #     --model ${models-dir}/gemma-4-31b-it.gguf
+  #     --ctx-size 131072
+  #     --batch-size 4096
+  #     --n-gpu-layers 99
+  #     --flash-attn on
+  #     --cache-type-k q8_0
+  #     --cache-type-v q8_0
+  #   ttl: 120
